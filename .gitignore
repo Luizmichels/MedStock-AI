@@ -41,3 +41,9 @@ dist/
 # Arquivos do sistema
 .DS_Store
 Thumbs.db
+
+# Arquivos gerados pelo LaTeX (RFC)
+*.aux
+*.out
+*.synctex.gz
+*.toc
