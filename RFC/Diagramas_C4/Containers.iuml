@@ -1,0 +1,38 @@
+@startuml C4_Containers
+!include <C4/C4_Component>
+
+LAYOUT_WITH_LEGEND()
+
+title Diagrama de Containers — Modelo Preditivo de Consumo Hospitalar
+
+Person(usuario, "Usuário", "Consulta previsões e exporta relatórios.")
+Person(administrador, "Administrador", "Importa dados e gerencia o sistema.")
+
+System_Ext(sistemaHospitalar, "Sistema Hospitalar (ERP/Legado)", "Fornece dados históricos de consumo via API ou arquivo CSV.")
+
+System_Ext(feriadosApi, "API de Feriados", "feriados.dev", "API externa que fornece feriados nacionais, estaduais e municipais do Brasil, utilizada para enriquecer os atributos calendário do modelo preditivo.")
+
+System_Boundary(sistema, "Sistema de Análise Preditiva") {
+
+    Container(frontend, "Aplicação Web", "React / Next.js", "Interface do usuário para visualização de dashboard, previsões, importação de dados e gestão de usuários.")
+
+    Container(api, "API REST", "Python / FastAPI", "Processa requisições do front-end, orquestra os módulos de importação, validação, predição e exportação.")
+
+    Container(mlService, "Serviço de ML", "Python / LightGBM / Skforecast / Statsmodels", "Executa o pipeline de treinamento e geração de previsões com modelos de Machine Learning (LightGBM, com aceleração por GPU) e séries temporais.")
+
+    Container(syncJob, "Job de Sincronização de Feriados", "Python / APScheduler", "Executa anualmente a consulta à API de Feriados e persiste os dados na tabela de feriados do banco de dados.")
+
+    ContainerDb(database, "Banco de Dados", "PostgreSQL", "Armazena dados históricos de consumo, previsões geradas, logs de importação, informações de usuários e tabela de feriados.")
+}
+
+Rel(usuario, frontend, "Acessa via navegador", "HTTPS")
+Rel(administrador, frontend, "Acessa via navegador", "HTTPS")
+Rel(frontend, api, "Realiza chamadas de API", "HTTPS / JSON")
+Rel(api, mlService, "Solicita treinamento e previsões", "Chamada interna Python")
+Rel(api, database, "Lê e grava dados", "SQL / SQLAlchemy")
+Rel(mlService, database, "Lê dados históricos, feriados e grava previsões", "SQL / SQLAlchemy")
+Rel(syncJob, feriadosApi, "Consulta feriados nacionais/estaduais/municipais", "HTTPS / REST JSON")
+Rel(syncJob, database, "Persiste feriados na tabela de feriados", "SQL / SQLAlchemy")
+Rel(sistemaHospitalar, api, "Envia dados de consumo", "API REST / CSV Upload")
+
+@enduml

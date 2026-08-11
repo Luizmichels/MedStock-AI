@@ -1,0 +1,21 @@
+@startuml C4_Contexto
+!include https://raw.githubusercontent.com/plantuml-stdlib/C4-PlantUML/master/C4_Context.puml
+
+LAYOUT_WITH_LEGEND()
+
+title Diagrama de Contexto — Modelo Preditivo de Consumo Hospitalar
+
+Person(usuario, "Usuário", "Gestor hospitalar responsável por consultar previsões de consumo e exportar relatórios.")
+Person(administrador, "Administrador", "Responsável por importar dados, gerenciar usuários e configurar o sistema.")
+Person(superAdmin, "Super Admin", "Responsável pela gestão global da plataforma: cadastro de empresas e aprovação de solicitações de acesso.")
+
+System(sistema, "Sistema de Análise Preditiva", "Processa dados históricos de consumo hospitalar, gera previsões com Machine Learning e disponibiliza um painel analítico.")
+
+System_Ext(sistemaHospitalar, "Sistema Hospitalar (ERP/Legado)", "Sistema de gestão hospitalar existente que fornece os dados históricos de consumo via API ou exportação CSV.")
+
+Rel(administrador, sistema, "Importa dados, gerencia usuários e acessa todas as funcionalidades", "HTTPS")
+Rel(usuario, sistema, "Consulta previsões, visualiza dashboard e exporta relatórios", "HTTPS")
+Rel(superAdmin, sistema, "Gerencia empresas cadastradas e aprova solicitações de acesso", "HTTPS")
+Rel(sistema, sistemaHospitalar, "Consome dados históricos de consumo de insumos", "API REST / CSV")
+
+@enduml

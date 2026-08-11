@@ -1,0 +1,54 @@
+@startuml C4_Componentes
+!include <C4/C4_Component>
+
+LAYOUT_WITH_LEGEND()
+
+title Diagrama de Componentes — API REST (FastAPI)
+
+Container_Ext(frontend, "Aplicação Web", "React / Next.js", "Interface do usuário.")
+ContainerDb_Ext(database, "Banco de Dados", "PostgreSQL", "Persistência dos dados, incluindo tabela de feriados.")
+Container_Ext(mlService, "Serviço de ML", "LightGBM / Skforecast / Statsmodels", "Treinamento e previsões.")
+System_Ext(feriadosApi, "API de Feriados", "feriados.dev", "Fornece feriados nacionais, estaduais e municipais do Brasil para a engenharia de atributos.")
+
+Container_Boundary(api, "API REST — FastAPI") {
+
+    Component(authModule, "Módulo de Autenticação", "FastAPI / JWT", "Gerencia login, sessões e controle de acesso por perfil (Administrador e Usuário). Autentica no contexto da empresa vinculada ao usuário.")
+
+    Component(userModule, "Módulo de Gestão de Usuários", "FastAPI", "Permite ao Administrador cadastrar, editar e inativar usuários da sua empresa.")
+
+    Component(companyModule, "Módulo de Gestão de Empresas", "FastAPI", "Exclusivo do Super Admin. Gerencia empresas cadastradas e aprova solicitações de acesso de novos hospitais.")
+
+    Component(importModule, "Módulo de Importação", "FastAPI / Pandas", "Recebe arquivos CSV, Excel ou dados via API e aciona o pipeline de validação.")
+
+    Component(validationModule, "Módulo de Validação e Tratamento", "Pandas / NumPy", "Verifica campos obrigatórios, trata nulos, remove duplicidades e realiza agregação temporal.")
+
+    Component(predictionModule, "Módulo de Previsão", "FastAPI", "Orquestra o treinamento dos modelos e a geração de previsões, consumindo o Serviço de ML.")
+
+    Component(dashboardModule, "Módulo de Dashboard", "FastAPI", "Fornece os dados analíticos para o painel: KPIs, classificação ABC e gráficos de consumo.")
+
+    Component(exportModule, "Módulo de Exportação", "FastAPI / ReportLab / OpenPyXL", "Gera e exporta relatórios nos formatos PDF e Excel (.xlsx).")
+
+    Component(syncModule, "Módulo de Sincronização de Feriados", "FastAPI / APScheduler", "Executa anualmente a consulta à API de Feriados e persiste os dados na tabela de feriados do banco de dados.")
+}
+
+Rel(frontend, authModule, "Autentica usuário", "HTTPS / JSON")
+Rel(frontend, userModule, "Gerencia usuários", "HTTPS / JSON")
+Rel(frontend, companyModule, "Gerencia empresas (Super Admin)", "HTTPS / JSON")
+Rel(frontend, importModule, "Envia arquivos ou configura API", "HTTPS / JSON")
+Rel(frontend, predictionModule, "Solicita previsões", "HTTPS / JSON")
+Rel(frontend, dashboardModule, "Consulta indicadores", "HTTPS / JSON")
+Rel(frontend, exportModule, "Solicita exportação", "HTTPS / JSON")
+
+Rel(importModule, validationModule, "Aciona validação dos dados recebidos", "Chamada interna")
+Rel(validationModule, database, "Grava dados tratados", "SQL")
+Rel(predictionModule, mlService, "Solicita treinamento e previsões", "Chamada interna Python")
+Rel(syncModule, feriadosApi, "Consulta feriados nacionais/estaduais/municipais", "HTTPS / REST JSON")
+Rel(syncModule, database, "Persiste feriados na tabela de feriados", "SQL")
+Rel(predictionModule, database, "Grava e consulta previsões", "SQL")
+Rel(dashboardModule, database, "Consulta dados analíticos", "SQL")
+Rel(authModule, database, "Consulta e grava dados de usuários", "SQL")
+Rel(userModule, database, "Consulta e grava usuários da empresa", "SQL")
+Rel(companyModule, database, "Consulta e grava empresas e solicitações", "SQL")
+Rel(exportModule, database, "Consulta dados para geração de relatório", "SQL")
+
+@enduml
