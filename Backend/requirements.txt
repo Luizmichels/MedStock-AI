@@ -19,3 +19,4 @@ reportlab
 python-dotenv
 pydantic-settings
 email-validator
+pytest
