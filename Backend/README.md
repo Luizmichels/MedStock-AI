@@ -15,28 +15,6 @@ API de análise preditiva de consumo de insumos hospitalares, construída com Fa
 - [Docker Desktop](https://www.docker.com/products/docker-desktop/) (forma recomendada de rodar o projeto)
 - Python 3.14 (só necessário se for rodar sem Docker)
 
-## Configuração (`.env`)
-
-Crie um arquivo `.env` na raiz do `Backend/` com as seguintes variáveis:
-
-| Variável | Descrição |
-|---|---|
-| `DATABASE_URL` | String de conexão do PostgreSQL (ex: `postgresql+psycopg://postgres:SENHA@localhost:5432/medstock`) |
-| `SECRET_KEY` | Chave usada para assinar os tokens JWT |
-| `ALGORITHM` | Algoritmo do JWT (default `HS256`) |
-| `ACCESS_TOKEN_EXPIRE_MINUTES` | Validade do token de login, em minutos (default `60`) |
-| `DEFINIR_SENHA_TOKEN_EXPIRE_MINUTES` | Validade do link de definição de senha, em minutos (default `2880` = 48h) |
-| `FRONTEND_URL` | URL base do frontend, usada para montar o link enviado por e-mail (default `http://localhost:3000`) |
-| `SUPER_ADMIN_EMAIL` | E-mail do super admin criado automaticamente no primeiro start |
-| `SUPER_ADMIN_SENHA` | Senha do super admin criado automaticamente no primeiro start |
-| `EMAIL_REMETENTE` | E-mail usado para enviar as notificações (ex: Gmail) |
-| `SENHA_EMAIL` | Senha de app do e-mail remetente (no Gmail, precisa ser uma [senha de app](https://myaccount.google.com/apppasswords), não a senha normal da conta) |
-| `SMTP_HOST` / `SMTP_PORT` | Servidor SMTP (default `smtp.gmail.com:587`) |
-| `FERIADOSAPI_KEY` | Chave da API de feriados usada no pipeline de dados |
-| `POSTGRES_PASSWORD` | Senha do usuário `postgres` — usada pelo `docker-compose.yml` para subir o container do banco (deve ser a mesma senha usada em `DATABASE_URL`) |
-
-O `.env` nunca deve ser commitado (já está no `.gitignore`).
-
 ## Rodando com Docker (recomendado)
 
 Com o Docker Desktop aberto e o `.env` configurado:
@@ -81,3 +59,21 @@ uvicorn app.main:app --reload
 ```
 
 Nesse caso, `DATABASE_URL` no `.env` deve apontar para um PostgreSQL acessível localmente (`localhost`, não `db`).
+
+## Rodando os testes
+
+Os testes rodam contra um PostgreSQL de verdade (não um banco simulado), em um banco separado (`medstock_test`) dentro do mesmo Postgres do `docker-compose.yml` — assim eles validam de verdade a conexão, a criação das tabelas e as constraints (`NOT NULL`, `unique`), sem tocar no banco de desenvolvimento.
+
+```bash
+docker compose up -d db     # garante que o Postgres está disponível em localhost:5432
+pip install -r requirements.txt
+pytest -v
+```
+
+O banco `medstock_test` é criado automaticamente na primeira execução, e cada teste roda dentro de uma transação que é desfeita (`rollback`) ao final — então rodar a suíte várias vezes seguidas não deixa dados residuais nem exige resetar o banco manualmente. Os e-mails de aprovação de solicitação são interceptados (mock) durante os testes, então nenhum e-mail real é enviado.
+
+Cobertura atual ([tests/](tests/)):
+- `test_database.py` — conexão com o banco, criação de todas as tabelas, e as constraints que já causaram bugs antes (`endereco` `NOT NULL`, `email` único).
+- `test_auth.py` — login (sucesso, senha errada, usuário inativo) e o fluxo de `/auth/definir-senha` (incluindo o link não poder ser reutilizado).
+- `test_empresas.py` — envio de solicitação (validação), permissões de super admin, e o fluxo completo de aprovação (cria empresa + usuário admin + dispara e-mail).
+- `test_usuarios.py` — permissões de admin, isolamento de dados entre empresas diferentes, e-mail duplicado, desativação.
