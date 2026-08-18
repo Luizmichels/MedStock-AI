@@ -12,6 +12,7 @@ from app.routers import (
     usuarios_routers,
     empresas_routers,
     feriados_routers,
+    importacoes_routers,
 )
 
 logging.basicConfig(
@@ -50,7 +51,7 @@ app.include_router(auth_routers.router)
 app.include_router(usuarios_routers.router)
 app.include_router(empresas_routers.router)
 app.include_router(feriados_routers.router)
-
+app.include_router(importacoes_routers.router)
 
 @app.get("/health", tags=["Sistema"])
 def health():

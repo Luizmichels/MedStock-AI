@@ -1,8 +1,3 @@
-"""
-Pipeline de validação e tratamento dos dados de consumo importados.
-Executado automaticamente após cada importação.
-"""
-
 import logging
 from datetime import date, datetime
 from io import BytesIO
@@ -23,6 +18,7 @@ COLUNAS_OBRIGATORIAS = {
     "descricao_item",
     "data",
     "quantidade",
+    "valor",
     "local_estoque",
 }
 
@@ -36,6 +32,10 @@ _ALIAS_COLUNAS = {
     "qtd": "quantidade",
     "qtde": "quantidade",
     "quantidade_consumida": "quantidade",
+    "valor_total": "valor",
+    "valor_consumo": "valor",
+    "preco": "valor",
+    "preco_total": "valor",
     "local": "local_estoque",
     "setor": "local_estoque",
     "data_consumo": "data",
@@ -116,6 +116,20 @@ def _limpar_dados(df: pd.DataFrame) -> Tuple[pd.DataFrame, list]:
                 f"linha {idx + 2}: quantidade inválida '{row.get('quantidade')}'"
             )
 
+        # Valor
+        try:
+            valor = float(str(row.get("valor", "")).replace(",", "."))
+            if valor <= 0:
+                linha_erros.append(
+                    f"linha {idx + 2}: valor deve ser positivo (encontrado: {valor})"
+                )
+            else:
+                df.at[idx, "valor"] = valor
+        except (ValueError, TypeError):
+            linha_erros.append(
+                f"linha {idx + 2}: valor inválido '{row.get('valor')}'"
+            )
+
         if linha_erros:
             erros.extend(linha_erros)
             linhas_invalidas.append(idx)
@@ -151,6 +165,7 @@ def _salvar_consumos_brutos(
             item_id=item.id,
             data=row["data"],
             quantidade=float(row["quantidade"]),
+            valor=float(row["valor"]),
             local_estoque=str(row.get("local_estoque", "")).strip() or None,
         )
         db.add(consumo)

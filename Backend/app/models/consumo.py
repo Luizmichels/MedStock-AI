@@ -12,6 +12,7 @@ class Consumo(Base):
     item_id: Mapped[int] = mapped_column(ForeignKey("itens.id"))
     data: Mapped[Date] = mapped_column(Date)
     quantidade: Mapped[float] = mapped_column(Float)
+    valor: Mapped[float] = mapped_column(Float)
     local_estoque: Mapped[str | None] = mapped_column(String(255), nullable=True)
     criado_em: Mapped[DateTime] = mapped_column(DateTime, server_default=func.now())
 
