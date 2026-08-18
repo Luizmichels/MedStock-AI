@@ -11,6 +11,7 @@ from app.routers import (
     auth_routers,
     usuarios_routers,
     empresas_routers,
+    feriados_routers,
 )
 
 logging.basicConfig(
@@ -48,6 +49,7 @@ def startup():
 app.include_router(auth_routers.router)
 app.include_router(usuarios_routers.router)
 app.include_router(empresas_routers.router)
+app.include_router(feriados_routers.router)
 
 
 @app.get("/health", tags=["Sistema"])

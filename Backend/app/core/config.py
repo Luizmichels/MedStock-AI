@@ -14,6 +14,8 @@ class Settings(BaseSettings):
     SENHA_EMAIL: str
     SMTP_HOST: str = "smtp.gmail.com"
     SMTP_PORT: int = 587
+    FERIADOSAPI_KEY: str
+    FERIADOSAPI_BASE_URL: str = "https://api.feriados.dev"
 
     class Config:
         env_file = ".env"

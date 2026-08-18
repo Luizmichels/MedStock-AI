@@ -11,6 +11,7 @@ from app.models.classificacao_abc import ClassificacaoABC
 from app.models.modelo_treinado import ModeloTreinado
 from app.models.previsoes import Previsao
 from app.models.feriados import Feriado
+from app.models.feriado_sincronizacao import FeriadoSincronizacao
 
 __all__ = [
     "Empresa",
@@ -23,5 +24,6 @@ __all__ = [
     "ClassificacaoABC",
     "ModeloTreinado",
     "Previsao",
-    "Feriado"
+    "Feriado",
+    "FeriadoSincronizacao",
 ]
