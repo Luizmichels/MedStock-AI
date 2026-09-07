@@ -2,6 +2,7 @@ from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
 
 from app.database import get_db
+from app.core.rate_limit import limitador_solicitacoes
 from app.dependencies import get_current_super_admin
 from app.schemas.empresa_schemas import EmpresaCreate, EmpresaUpdate, EmpresaResponse
 from app.schemas.solicitacao_acesso_schemas import (
@@ -60,7 +61,11 @@ def desativar(
     status_code=201,
     summary="Enviar solicitação de acesso (público)",
 )
-def solicitar_acesso(dados: SolicitacaoCreate, db: Session = Depends(get_db)):
+def solicitar_acesso(
+    dados: SolicitacaoCreate,
+    db: Session = Depends(get_db),
+    _: None = Depends(limitador_solicitacoes),
+):
     return empresa_service.criar_solicitacao(db, dados)
 
 @router.get("/solicitacoes/pendentes", response_model=list[SolicitacaoResponse])
