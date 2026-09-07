@@ -38,8 +38,11 @@ def get_current_user(
         raise HTTPException(status_code=401, detail="Usuário não encontrado ou inativo")
     return usuario
 
+PERFIS_ADMINISTRATIVOS = {"admin", "super_admin"}
+
+
 def require_admin(current_user: Usuario = Depends(get_current_user)) -> Usuario:
-    if current_user.perfil != "admin":
+    if current_user.perfil not in PERFIS_ADMINISTRATIVOS:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Apenas administradores podem realizar esta ação",
