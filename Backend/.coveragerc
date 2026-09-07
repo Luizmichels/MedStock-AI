@@ -1,0 +1,13 @@
+[run]
+source = app
+omit =
+    app/__init__.py
+    app/models/__init__.py
+
+[report]
+exclude_lines =
+    pragma: no cover
+    if TYPE_CHECKING:
+    raise NotImplementedError
+show_missing = True
+precision = 1

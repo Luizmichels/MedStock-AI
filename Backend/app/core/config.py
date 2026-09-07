@@ -3,6 +3,9 @@ from pydantic_settings import BaseSettings
 
 class Settings(BaseSettings):
     DATABASE_URL: str
+    # Banco usado pela suíte de testes. Se ausente, o conftest cai para SQLite
+    # em memória; defina para um Postgres real no CI para fidelidade de produção.
+    TEST_DATABASE_URL: str | None = None
     SECRET_KEY: str
     ALGORITHM: str = "HS256"
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 60

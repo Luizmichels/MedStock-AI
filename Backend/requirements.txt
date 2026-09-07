@@ -20,3 +20,6 @@ python-dotenv
 pydantic-settings
 email-validator
 pytest
+pytest-cov
+respx
+freezegun

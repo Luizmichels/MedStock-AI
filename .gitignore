@@ -35,6 +35,11 @@ dist/
 # Cache do pytest
 .pytest_cache/
 
+# Cobertura de testes
+.coverage
+htmlcov/
+coverage.xml
+
 # Cache do mypy
 .mypy_cache/
 
@@ -47,3 +52,6 @@ Thumbs.db
 *.out
 *.synctex.gz
 *.toc
+
+# claude
+*.claude
