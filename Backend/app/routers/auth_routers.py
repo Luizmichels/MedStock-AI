@@ -10,10 +10,15 @@ from app.schemas.auth_schemas import (
     LoginRequest,
     TokenResponse,
     DefinirSenhaRequest,
+    EmailRequest,
+    RedefinirSenhaRequest,
     MensagemResponse,
 )
+from app.services import auth_service
 
 router = APIRouter(prefix="/auth", tags=["Autenticação"])
+
+_MSG_GENERICA = "Se o e-mail estiver cadastrado, enviaremos as instruções."
 
 
 @router.post("/login", response_model=TokenResponse)
@@ -60,3 +65,21 @@ def definir_senha(body: DefinirSenhaRequest, db: Session = Depends(get_db)):
     usuario.ativo = True
     db.commit()
     return MensagemResponse(mensagem="Senha definida com sucesso")
+
+
+@router.post("/esqueci-senha", response_model=MensagemResponse)
+def esqueci_senha(body: EmailRequest, db: Session = Depends(get_db)):
+    auth_service.solicitar_redefinicao_senha(db, body.email)
+    return MensagemResponse(mensagem=_MSG_GENERICA)
+
+
+@router.post("/redefinir-senha", response_model=MensagemResponse)
+def redefinir_senha(body: RedefinirSenhaRequest, db: Session = Depends(get_db)):
+    auth_service.redefinir_senha(db, body.token, body.senha)
+    return MensagemResponse(mensagem="Senha redefinida com sucesso")
+
+
+@router.post("/reenviar-ativacao", response_model=MensagemResponse)
+def reenviar_ativacao(body: EmailRequest, db: Session = Depends(get_db)):
+    auth_service.reenviar_ativacao(db, body.email)
+    return MensagemResponse(mensagem=_MSG_GENERICA)

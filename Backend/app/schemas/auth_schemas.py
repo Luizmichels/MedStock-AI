@@ -12,5 +12,12 @@ class DefinirSenhaRequest(BaseModel):
     token: str
     senha: str
 
+class EmailRequest(BaseModel):
+    email: EmailStr
+
+class RedefinirSenhaRequest(BaseModel):
+    token: str
+    senha: str
+
 class MensagemResponse(BaseModel):
     mensagem: str
