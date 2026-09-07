@@ -12,6 +12,7 @@ from app.models.modelo_treinado import ModeloTreinado
 from app.models.previsoes import Previsao
 from app.models.feriados import Feriado
 from app.models.feriado_sincronizacao import FeriadoSincronizacao
+from app.models.logs_execucao import LogExecucao
 
 __all__ = [
     "Empresa",
@@ -26,4 +27,5 @@ __all__ = [
     "Previsao",
     "Feriado",
     "FeriadoSincronizacao",
+    "LogExecucao",
 ]
