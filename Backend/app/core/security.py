@@ -1,6 +1,6 @@
 import bcrypt
 from jose import jwt
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from app.core.config import settings
 
 def hash_senha(senha: str) -> str:
@@ -11,7 +11,7 @@ def verificar_senha(senha: str, senha_hashed: str) -> bool:
 
 def criar_token(data: dict, expires_minutes: int | None = None) -> str:
     payload = data.copy()
-    payload["exp"] = datetime.utcnow() + timedelta(
+    payload["exp"] = datetime.now(timezone.utc) + timedelta(
         minutes=expires_minutes or settings.ACCESS_TOKEN_EXPIRE_MINUTES
     )
     return jwt.encode(payload, settings.SECRET_KEY, algorithm=settings.ALGORITHM)
