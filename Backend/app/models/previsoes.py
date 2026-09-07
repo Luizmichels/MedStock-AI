@@ -1,10 +1,13 @@
-from sqlalchemy import Integer, Float, Date, ForeignKey, DateTime
+from sqlalchemy import Integer, Float, Date, ForeignKey, DateTime, Index
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from sqlalchemy.sql import func
 from app.database import Base
 
 class Previsao(Base):
     __tablename__ = "previsoes"
+    __table_args__ = (
+        Index("ix_previsao_empresa_periodo", "empresa_id", "periodo"),
+    )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     empresa_id: Mapped[int] = mapped_column(ForeignKey("empresas.id"))

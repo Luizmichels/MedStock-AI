@@ -8,7 +8,7 @@ class ModeloTreinado(Base):
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     empresa_id: Mapped[int] = mapped_column(ForeignKey("empresas.id"))
-    # 'sma' | 'sarima' | 'holt_winters' | 'random_forest' | 'xgboost'
+    # 'sma' | 'sarima' | 'holt_winters' | 'random_forest' | 'gradient_boosting'
     algoritmo: Mapped[str] = mapped_column(String(50))
     parametros: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     rmse: Mapped[float | None] = mapped_column(Float, nullable=True)
