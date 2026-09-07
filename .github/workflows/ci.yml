@@ -1,0 +1,50 @@
+name: CI Backend
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  testes:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: Backend
+
+    env:
+      # A suíte usa SQLite em memória por padrão (rápido e sem serviços externos).
+      # Para rodar contra Postgres, defina TEST_DATABASE_URL apontando para um
+      # serviço `postgres` e o conftest usará esse banco.
+      DATABASE_URL: sqlite+pysqlite:///:memory:
+      SECRET_KEY: ci_secret_key
+      SUPER_ADMIN_EMAIL: admin@ci.local
+      SUPER_ADMIN_SENHA: Admin@CI123
+      EMAIL_REMETENTE: ci@ci.local
+      SENHA_EMAIL: senha-ci
+      FERIADOSAPI_KEY: chave-ci
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configurar Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Instalar dependências
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Rodar testes com cobertura (gate 75%)
+        run: pytest --cov=app --cov-report=xml --cov-report=term-missing --cov-fail-under=75
+
+      - name: Publicar relatório de cobertura
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: cobertura
+          path: Backend/coverage.xml
