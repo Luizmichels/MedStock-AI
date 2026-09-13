@@ -31,6 +31,13 @@ def test_enviar_solicitacao_sucesso(client):
     assert resposta.json()["status"] == "pendente"
 
 
+def test_enviar_solicitacao_excede_rate_limit_da_429(client):
+    for _ in range(5):
+        assert client.post("/empresas/enviar/solicitacao", json=SOLICITACAO_VALIDA).status_code == 201
+    resposta = client.post("/empresas/enviar/solicitacao", json=SOLICITACAO_VALIDA)
+    assert resposta.status_code == 429
+
+
 def test_enviar_solicitacao_sem_endereco_da_422(client):
     payload = {k: v for k, v in SOLICITACAO_VALIDA.items() if k != "endereco"}
 
@@ -62,6 +69,21 @@ def test_listar_solicitacoes_com_usuario_comum_e_negado(client, db_session, empr
     )
 
     assert resposta.status_code == 403
+
+
+def test_listar_solicitacoes_pendentes_omite_processadas(client, db_session, token_super_admin):
+    _criar_solicitacao_pendente(db_session)
+    _criar_solicitacao_pendente(db_session, email="outro@x.com", status="aprovado")
+
+    resposta = client.get(
+        "/empresas/solicitacoes/pendentes",
+        headers={"Authorization": f"Bearer {token_super_admin}"},
+    )
+
+    assert resposta.status_code == 200
+    corpo = resposta.json()
+    assert len(corpo) == 1
+    assert corpo[0]["status"] == "pendente"
 
 
 def test_aprovar_solicitacao_cria_empresa_e_usuario_admin(client, db_session, token_super_admin, enviar_email_mock):

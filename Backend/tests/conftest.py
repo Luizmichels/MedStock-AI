@@ -1,9 +1,13 @@
 import re
+from datetime import date
 from unittest.mock import MagicMock
 
+import httpx
 import pytest
+from dateutil.relativedelta import relativedelta
 from sqlalchemy import create_engine, text
 from sqlalchemy.orm import sessionmaker
+from sqlalchemy.pool import StaticPool
 from fastapi.testclient import TestClient
 
 import app.models  # noqa: F401 — registra os modelos no metadata antes do create_all
@@ -11,17 +15,20 @@ from app.core.config import settings
 from app.core.security import criar_token, hash_senha
 from app.database import Base, get_db
 from app.main import app
+from app.models.consumo_tratado import ConsumoTratado
 from app.models.empresa import Empresa
+from app.models.itens import Item
 from app.models.usuario import Usuario
 
 
 def _test_database_url() -> str:
-    if getattr(settings, "TEST_DATABASE_URL", None):
-        return settings.TEST_DATABASE_URL
-    return re.sub(r"/[^/]+$", "/medstock_test", settings.DATABASE_URL)
+    # SQLite em memória é o padrão: zero setup, rápido e determinístico.
+    # Para rodar contra um Postgres real (ex.: CI), defina TEST_DATABASE_URL.
+    return getattr(settings, "TEST_DATABASE_URL", None) or "sqlite+pysqlite:///:memory:"
 
 
 TEST_DATABASE_URL = _test_database_url()
+_USA_SQLITE = TEST_DATABASE_URL.startswith("sqlite")
 
 
 def _garantir_banco_teste_existe() -> None:
@@ -39,8 +46,17 @@ def _garantir_banco_teste_existe() -> None:
 
 @pytest.fixture(scope="session")
 def engine():
-    _garantir_banco_teste_existe()
-    test_engine = create_engine(TEST_DATABASE_URL)
+    if _USA_SQLITE:
+        # StaticPool + check_same_thread mantêm o banco em memória vivo e
+        # compartilhado entre a sessão de teste e o TestClient.
+        test_engine = create_engine(
+            TEST_DATABASE_URL,
+            connect_args={"check_same_thread": False},
+            poolclass=StaticPool,
+        )
+    else:
+        _garantir_banco_teste_existe()
+        test_engine = create_engine(TEST_DATABASE_URL)
     Base.metadata.drop_all(bind=test_engine)
     Base.metadata.create_all(bind=test_engine)
     yield test_engine
@@ -49,16 +65,31 @@ def engine():
 
 @pytest.fixture
 def db_session(engine):
-    connection = engine.connect()
-    transacao = connection.begin()
-    SessionTeste = sessionmaker(bind=connection, join_transaction_mode="create_savepoint")
-    session = SessionTeste()
-
-    yield session
-
-    session.close()
-    transacao.rollback()
-    connection.close()
+    if _USA_SQLITE:
+        # StaticPool compartilha uma única conexão em memória, então recriar o
+        # schema a cada teste é a forma mais robusta de isolar (e é instantâneo).
+        # O reset fica no setup para que o schema permaneça disponível entre
+        # testes (ex.: os que inspecionam o `engine` diretamente).
+        Base.metadata.drop_all(bind=engine)
+        Base.metadata.create_all(bind=engine)
+        SessionTeste = sessionmaker(bind=engine)
+        session = SessionTeste()
+        try:
+            yield session
+        finally:
+            session.close()
+    else:
+        # Postgres: isolamento por transação externa + savepoints (mais rápido).
+        connection = engine.connect()
+        transacao = connection.begin()
+        SessionTeste = sessionmaker(bind=connection, join_transaction_mode="create_savepoint")
+        session = SessionTeste()
+        try:
+            yield session
+        finally:
+            session.close()
+            transacao.rollback()
+            connection.close()
 
 
 @pytest.fixture
@@ -79,6 +110,15 @@ def client(db_session, enviar_email_mock):
     test_client = TestClient(app)
     yield test_client
     app.dependency_overrides.clear()
+
+
+@pytest.fixture(autouse=True)
+def _reset_rate_limit():
+    # Zera o limitador em memória entre testes para não vazar estado.
+    from app.core.rate_limit import limitador_solicitacoes
+
+    limitador_solicitacoes.reset()
+    yield
 
 
 @pytest.fixture
@@ -127,3 +167,102 @@ def token_para(usuario: Usuario) -> str:
 @pytest.fixture
 def token_super_admin() -> str:
     return criar_token({"sub": "0", "perfil": "super_admin"})
+
+
+@pytest.fixture
+def token_admin(usuario_admin) -> str:
+    return token_para(usuario_admin)
+
+
+@pytest.fixture
+def usuario_comum(db_session, empresa) -> Usuario:
+    return criar_usuario(db_session, empresa, perfil="usuario")
+
+
+@pytest.fixture
+def empresa_secundaria(db_session) -> Empresa:
+    """Segunda empresa, para os testes de isolamento (RF16)."""
+    empresa = Empresa(
+        nome="Hospital Secundário",
+        cnpj="11.111.111/0001-11",
+        email_responsavel="responsavel@hospital2.com",
+        nome_responsavel="Responsável Dois",
+        endereco="Avenida de Teste, 200",
+        cidade="Curitiba",
+        uf="PR",
+    )
+    db_session.add(empresa)
+    db_session.commit()
+    db_session.refresh(empresa)
+    return empresa
+
+
+@pytest.fixture
+def item(db_session, empresa) -> Item:
+    item = Item(
+        empresa_id=empresa.id,
+        codigo_item="MED001",
+        descricao_item="Dipirona 500mg",
+    )
+    db_session.add(item)
+    db_session.commit()
+    db_session.refresh(item)
+    return item
+
+
+@pytest.fixture
+def serie_consumo(db_session, empresa, item):
+    """18 meses de ConsumoTratado com tendência + sazonalidade determinística."""
+    base = date(2024, 1, 1)
+    registros = []
+    for i in range(18):
+        periodo = base + relativedelta(months=i)
+        sazonal = 20 if periodo.month in (11, 12) else 0
+        quantidade = 100 + 5 * i + sazonal
+        tratado = ConsumoTratado(
+            empresa_id=empresa.id,
+            item_id=item.id,
+            periodo=periodo,
+            quantidade_total=float(quantidade),
+            valor_total=float(quantidade) * 10.0,
+            local_estoque="Almoxarifado Central",
+        )
+        db_session.add(tratado)
+        registros.append(tratado)
+    db_session.commit()
+    return registros
+
+
+@pytest.fixture
+def csv_valido() -> bytes:
+    """CSV mínimo com as 6 colunas obrigatórias e 3 linhas boas."""
+    linhas = [
+        "codigo_item;descricao_item;data;quantidade;valor;local_estoque",
+        "MED001;Dipirona 500mg;01/01/2024;100;250.50;Almoxarifado Central",
+        "MED002;Soro Fisiológico 500ml;15/01/2024;50;120.00;Farmácia",
+        "MED001;Dipirona 500mg;10/02/2024;80;200.00;Almoxarifado Central",
+    ]
+    return "\n".join(linhas).encode("utf-8")
+
+
+@pytest.fixture
+def csv_invalido() -> bytes:
+    """CSV sem a coluna 'data' — dispara o FA02."""
+    linhas = [
+        "codigo_item;descricao_item;quantidade;valor;local_estoque",
+        "MED001;Dipirona 500mg;100;250.50;Almoxarifado Central",
+    ]
+    return "\n".join(linhas).encode("utf-8")
+
+
+@pytest.fixture
+def feriados_mock(respx_mock):
+    """Intercepta GET api.feriados.dev/v1/holidays com payload fixo."""
+    payload = [
+        {"date": "2024-01-01", "name": "Confraternização Universal", "type": "national"},
+        {"date": "2024-12-25", "name": "Natal", "type": "national"},
+        {"date": "2024-03-08", "name": "Aniversário da Cidade", "type": "municipal"},
+    ]
+    rota = respx_mock.get(url__startswith=f"{settings.FERIADOSAPI_BASE_URL}/v1/holidays")
+    rota.mock(return_value=httpx.Response(200, json=payload))
+    return rota

@@ -57,8 +57,11 @@ def criar_solicitacao(db: Session, dados: SolicitacaoCreate) -> SolicitacaoAcess
     return solicitacao
 
 
-def listar_solicitacoes(db: Session) -> list[SolicitacaoAcesso]:
-    return db.query(SolicitacaoAcesso).order_by(SolicitacaoAcesso.criado_em.desc()).all()
+def listar_solicitacoes(db: Session, *, status: str | None = "pendente") -> list[SolicitacaoAcesso]:
+    query = db.query(SolicitacaoAcesso)
+    if status:
+        query = query.filter(SolicitacaoAcesso.status == status)
+    return query.order_by(SolicitacaoAcesso.criado_em.desc()).all()
 
 
 def atualizar_status_solicitacao(

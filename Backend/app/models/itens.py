@@ -1,10 +1,13 @@
-from sqlalchemy import Integer, String, Boolean, ForeignKey, DateTime
+from sqlalchemy import Integer, String, Boolean, ForeignKey, DateTime, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from sqlalchemy.sql import func
 from app.database import Base
 
 class Item(Base):
     __tablename__ = "itens"
+    __table_args__ = (
+        UniqueConstraint("empresa_id", "codigo_item", name="uq_itens_empresa_codigo"),
+    )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     empresa_id: Mapped[int] = mapped_column(ForeignKey("empresas.id"))

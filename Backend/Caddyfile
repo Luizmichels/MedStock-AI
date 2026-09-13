@@ -1,0 +1,7 @@
+# Proxy reverso com HTTPS automático (RNF11).
+# Em produção, defina a variável DOMINIO com o domínio real; o Caddy emite e
+# renova o certificado TLS via Let's Encrypt automaticamente.
+{$DOMINIO:localhost} {
+	reverse_proxy api:8000
+	encode gzip
+}

@@ -1,5 +1,5 @@
 import logging
-from datetime import date, datetime
+from datetime import date, datetime, timezone
 from io import BytesIO
 from typing import BinaryIO, Tuple
 
@@ -82,59 +82,54 @@ def _parsear_data(valor: str | date) -> date | None:
     return None
 
 
+def _numerico(coluna: pd.Series) -> pd.Series:
+    """Converte para float aceitando vírgula decimal; inválidos viram NaN."""
+    return pd.to_numeric(
+        coluna.astype(str).str.strip().str.replace(",", ".", regex=False),
+        errors="coerce",
+    )
+
+
 def _limpar_dados(df: pd.DataFrame) -> Tuple[pd.DataFrame, list]:
-    erros = []
-    df = df.drop_duplicates()
+    df = df.drop_duplicates().copy()  # mantém o índice original para o número da linha
+    erros: list[str] = []
+    invalidas = pd.Series(False, index=df.index)
 
-    linhas_invalidas = []
-    for idx, row in df.iterrows():
-        linha_erros = []
+    def _linha(idx) -> int:
+        return int(idx) + 2
 
-        # Nulos em campos obrigatórios
-        for col in COLUNAS_OBRIGATORIAS:
-            if pd.isna(row.get(col)) or str(row.get(col, "")).strip() == "":
-                linha_erros.append(f"linha {idx + 2}: campo '{col}' nulo")
+    # Nulos em campos obrigatórios
+    for col in COLUNAS_OBRIGATORIAS:
+        coluna = df[col]
+        nulo = coluna.isna() | (coluna.astype(str).str.strip() == "")
+        for idx in df.index[nulo]:
+            erros.append(f"linha {_linha(idx)}: campo '{col}' nulo")
+        invalidas |= nulo
 
-        # Data
-        data_parsed = _parsear_data(row.get("data"))
-        if data_parsed is None:
-            linha_erros.append(f"linha {idx + 2}: data inválida '{row.get('data')}'")
-        else:
-            df.at[idx, "data"] = data_parsed
+    # Data
+    datas = df["data"].apply(_parsear_data)
+    data_invalida = datas.isna()
+    for idx in df.index[data_invalida]:
+        erros.append(f"linha {_linha(idx)}: data inválida '{df.at[idx, 'data']}'")
+    df["data"] = datas
+    invalidas |= data_invalida
 
-        # Quantidade
-        try:
-            qtd = float(str(row.get("quantidade", "")).replace(",", "."))
-            if qtd <= 0:
-                linha_erros.append(
-                    f"linha {idx + 2}: quantidade deve ser positiva (encontrado: {qtd})"
-                )
-            else:
-                df.at[idx, "quantidade"] = qtd
-        except (ValueError, TypeError):
-            linha_erros.append(
-                f"linha {idx + 2}: quantidade inválida '{row.get('quantidade')}'"
+    # Quantidade e Valor (mesma regra: numérico e estritamente positivo)
+    for col in ("quantidade", "valor"):
+        numerico = _numerico(df[col])
+        invalido = numerico.isna()
+        nao_positivo = (~invalido)
+        for idx in df.index[invalido]:
+            erros.append(f"linha {_linha(idx)}: {col} inválid{'a' if col == 'quantidade' else 'o'} '{df.at[idx, col]}'")
+        for idx in df.index[nao_positivo]:
+            erros.append(
+                f"linha {_linha(idx)}: {col} deve ser positiv{'a' if col == 'quantidade' else 'o'} "
+                f"(encontrado: {numerico[idx]})"
             )
+        df[col] = numerico
+        invalidas |= invalido | nao_positivo
 
-        # Valor
-        try:
-            valor = float(str(row.get("valor", "")).replace(",", "."))
-            if valor <= 0:
-                linha_erros.append(
-                    f"linha {idx + 2}: valor deve ser positivo (encontrado: {valor})"
-                )
-            else:
-                df.at[idx, "valor"] = valor
-        except (ValueError, TypeError):
-            linha_erros.append(
-                f"linha {idx + 2}: valor inválido '{row.get('valor')}'"
-            )
-
-        if linha_erros:
-            erros.extend(linha_erros)
-            linhas_invalidas.append(idx)
-
-    df_valido = df.drop(index=linhas_invalidas).reset_index(drop=True)
+    df_valido = df[~invalidas].reset_index(drop=True)
     return df_valido, erros
 
 
@@ -186,16 +181,16 @@ def _agregar_consumos_tratados(db: Session, empresa_id: int) -> None:
             "item_id": c.item_id,
             "periodo": c.data.replace(day=1),
             "quantidade": c.quantidade,
+            "valor": c.valor,
             "local_estoque": c.local_estoque,
         }
         for c in consumos
     ]
     df = pd.DataFrame(registros)
     agregado = (
-        df.groupby(["item_id", "periodo", "local_estoque"])["quantidade"]
-        .sum()
+        df.groupby(["item_id", "periodo", "local_estoque"], dropna=False)
+        .agg(quantidade_total=("quantidade", "sum"), valor_total=("valor", "sum"))
         .reset_index()
-        .rename(columns={"quantidade": "quantidade_total"})
     )
 
     # Remove tratados antigos e recria (estratégia simples para recalculo completo)
@@ -206,21 +201,16 @@ def _agregar_consumos_tratados(db: Session, empresa_id: int) -> None:
             item_id=int(row["item_id"]),
             periodo=row["periodo"],
             quantidade_total=float(row["quantidade_total"]),
+            valor_total=float(row["valor_total"]),
             local_estoque=row["local_estoque"] if pd.notna(row["local_estoque"]) else None,
         )
         db.add(tratado)
 
 
-def processar_arquivo(
-    db: Session,
-    conteudo: bytes,
-    nome_arquivo: str,
-    empresa_id: int,
-    usuario_id: int,
+def criar_importacao_processando(
+    db: Session, nome_arquivo: str, empresa_id: int, usuario_id: int
 ) -> Importacao:
-    """
-    Ponto de entrada do pipeline. Retorna o registro de Importacao criado.
-    """
+    """Cria o registro de importação com status 'processando' (persistido)."""
     extensao = nome_arquivo.lower().rsplit(".", 1)[-1]
     tipo = "excel" if extensao in ("xls", "xlsx") else "csv"
 
@@ -232,8 +222,15 @@ def processar_arquivo(
         status="processando",
     )
     db.add(importacao)
-    db.flush()
+    db.commit()
+    db.refresh(importacao)
+    return importacao
 
+
+def executar_pipeline(
+    db: Session, importacao: Importacao, conteudo: bytes, nome_arquivo: str, empresa_id: int
+) -> Importacao:
+    """Processa o arquivo dentro de uma importação já criada e atualiza seu status."""
     try:
         logger.info("Iniciando pipeline de importação id=%s empresa=%s", importacao.id, empresa_id)
 
@@ -253,7 +250,7 @@ def processar_arquivo(
             _agregar_consumos_tratados(db, empresa_id)
 
         importacao.status = "concluido"
-        importacao.concluido_em = datetime.utcnow()
+        importacao.concluido_em = datetime.now(timezone.utc)
         logger.info(
             "Pipeline concluído id=%s válidos=%s inválidos=%s",
             importacao.id, importacao.registros_validos, importacao.registros_invalidos,
@@ -262,9 +259,43 @@ def processar_arquivo(
     except Exception as exc:
         importacao.status = "erro"
         importacao.erros = [str(exc)]
-        importacao.concluido_em = datetime.utcnow()
+        importacao.concluido_em = datetime.now(timezone.utc)
         logger.error("Erro na importação id=%s: %s", importacao.id, exc, exc_info=True)
 
     db.commit()
     db.refresh(importacao)
+
+    from app.services import log_service
+
+    if importacao.status == "concluido":
+        log_service.registrar(
+            db, "importacao", "info",
+            f"Importação {importacao.id} concluída",
+            empresa_id=empresa_id,
+            contexto={
+                "arquivo": nome_arquivo,
+                "validos": importacao.registros_validos,
+                "invalidos": importacao.registros_invalidos,
+            },
+        )
+    else:
+        log_service.registrar(
+            db, "importacao", "erro",
+            f"Importação {importacao.id} falhou",
+            empresa_id=empresa_id,
+            contexto={"arquivo": nome_arquivo, "erros": importacao.erros},
+        )
+
     return importacao
+
+
+def processar_arquivo(
+    db: Session,
+    conteudo: bytes,
+    nome_arquivo: str,
+    empresa_id: int,
+    usuario_id: int,
+) -> Importacao:
+    """Ponto de entrada síncrono do pipeline: cria a importação e a processa."""
+    importacao = criar_importacao_processando(db, nome_arquivo, empresa_id, usuario_id)
+    return executar_pipeline(db, importacao, conteudo, nome_arquivo, empresa_id)
