@@ -31,7 +31,11 @@ def solicitar_redefinicao_senha(db: Session, email: str) -> None:
     if not usuario:
         return
     token = criar_token(
-        {"sub": str(usuario.id), "tipo": "redefinir_senha"},
+        {
+            "sub": str(usuario.id),
+            "tipo": "redefinir_senha",
+            "v": usuario.senha_hash[:10],
+        },
         expires_minutes=settings.DEFINIR_SENHA_TOKEN_EXPIRE_MINUTES,
     )
     texto, html = montar_email_definicao_senha(usuario.nome, _link(token, "redefinir-senha"))
@@ -50,6 +54,12 @@ def redefinir_senha(db: Session, token: str, nova_senha: str) -> None:
     usuario = db.query(Usuario).filter(Usuario.id == int(payload["sub"])).first()
     if not usuario:
         raise HTTPException(status_code=404, detail="Usuário não encontrado")
+
+    versao = payload.get("v")
+    if versao and versao != usuario.senha_hash[:10]:
+        raise HTTPException(
+            status_code=401, detail="Token já utilizado ou expirado. Solicite uma nova redefinição."
+        )
 
     usuario.senha_hash = hash_senha(nova_senha)
     db.commit()
