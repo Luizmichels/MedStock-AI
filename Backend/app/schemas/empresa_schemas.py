@@ -1,7 +1,8 @@
-from pydantic import BaseModel, EmailStr
+from pydantic import BaseModel, EmailStr, field_validator
 from typing import Optional
 from datetime import datetime
 
+from app.core.validadores import cnpj_valido
 
 class EmpresaCreate(BaseModel):
     nome: str
@@ -11,6 +12,13 @@ class EmpresaCreate(BaseModel):
     endereco: str
     cidade: str
     uf: str
+
+    @field_validator("cnpj")
+    @classmethod
+    def validar_cnpj(cls, valor: Optional[str]) -> Optional[str]:
+        if valor is not None and not cnpj_valido(valor):
+            raise ValueError("CNPJ inválido.")
+        return valor
 
 
 class EmpresaUpdate(BaseModel):
@@ -22,6 +30,13 @@ class EmpresaUpdate(BaseModel):
     endereco: Optional[str] = None
     uf: Optional[str] = None
     cidade: Optional[str] = None
+
+    @field_validator("cnpj")
+    @classmethod
+    def validar_cnpj(cls, valor: Optional[str]) -> Optional[str]:
+        if valor is not None and not cnpj_valido(valor):
+            raise ValueError("CNPJ inválido.")
+        return valor
 
 
 class EmpresaResponse(BaseModel):
