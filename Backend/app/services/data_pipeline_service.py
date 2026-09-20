@@ -60,7 +60,7 @@ def _normalizar_colunas(df: pd.DataFrame) -> pd.DataFrame:
     df.rename(columns=_ALIAS_COLUNAS, inplace=True)
     return df
 
-
+#Texto da mensagem de erro omite a coluna obrigatória valor no exemplo.
 def _validar_colunas(df: pd.DataFrame) -> None:
     faltando = COLUNAS_OBRIGATORIAS - set(df.columns)
     if faltando:

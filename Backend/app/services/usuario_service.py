@@ -58,6 +58,7 @@ def atualizar_usuario(
     return usuario
 
 
+#Permite auto-desativação e exclusão do último administrador ativo da empresa.
 def desativar_usuario(db: Session, usuario_id: int, empresa_id: int) -> Usuario:
     usuario = buscar_usuario(db, usuario_id, empresa_id)
     usuario.ativo = False

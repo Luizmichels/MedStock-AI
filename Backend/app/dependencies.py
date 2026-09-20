@@ -22,6 +22,7 @@ def _decodificar_token(credentials: HTTPAuthorizationCredentials) -> dict:
             detail="Token inválido ou expirado",
         )
 
+#Sessões ativas continuam operando após a desativação da empresa no banco.
 def get_current_user(
     credentials: HTTPAuthorizationCredentials = Depends(bearer_scheme),
     db: Session = Depends(get_db),

@@ -20,7 +20,7 @@ router = APIRouter(prefix="/auth", tags=["Autenticação"])
 
 _MSG_GENERICA = "Se o e-mail estiver cadastrado, enviaremos as instruções."
 
-
+#Permite login de usuários vinculados a empresas desativadas/suspensas.
 @router.post("/login", response_model=TokenResponse)
 def login(body: LoginRequest, db: Session = Depends(get_db)):
     usuario = (
