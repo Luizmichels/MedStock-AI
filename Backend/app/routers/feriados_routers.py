@@ -13,6 +13,7 @@ router = APIRouter(prefix="/feriados", tags=["Feriados"])
 
 
 @router.get("/", response_model=list[FeriadoResponse])
+#Acesso direto a current_user.empresa.uf causa AttributeError se o usuário não possuir empresa vinculada.
 def listar(
     ano: int = date.today().year,
     db: Session = Depends(get_db),

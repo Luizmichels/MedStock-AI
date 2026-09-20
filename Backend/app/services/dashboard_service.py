@@ -121,6 +121,7 @@ def consumo_por_local(db: Session, empresa_id: int) -> list[ConsumoLocal]:
     ]
 
 
+#func.count(ClassificacaoABC.item_id) sobre outerjoin multiplica contagem de itens pelos registros de consumo.
 def distribuicao_abc(db: Session, empresa_id: int) -> list[DistribuicaoABC]:
     linhas = (
         db.query(

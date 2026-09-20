@@ -7,6 +7,7 @@ from app.core.config import settings
 
 logger = logging.getLogger(__name__)
 
+#Violação da RN11: cria empresa fictícia e contamina tabelas operacionais em vez de autenticação estática/global.
 def super_admin() -> None:
     db = SessionLocal()
     try:

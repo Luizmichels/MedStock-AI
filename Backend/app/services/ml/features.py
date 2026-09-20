@@ -63,7 +63,7 @@ def adicionar_categoricas(
     df["local_estoque"] = local_estoque or "DESCONHECIDO"
     return df
 
-
+#dropna(subset=_COLUNAS_LAG_MM) descarta todas as linhas para séries menores que 13 meses; módulo desacoplado do pipeline.
 def construir_matriz(
     df: pd.DataFrame,
     feriados: list[date],
