@@ -14,7 +14,6 @@ from app.routers import (
     auth_routers,
     usuarios_routers,
     empresas_routers,
-    feriados_routers,
     importacoes_routers,
     itens_routers,
     consumos_routers,
@@ -64,7 +63,6 @@ async def handler_generico(request: Request, exc: Exception):
 app.include_router(auth_routers.router)
 app.include_router(usuarios_routers.router)
 app.include_router(empresas_routers.router)
-app.include_router(feriados_routers.router)
 app.include_router(importacoes_routers.router)
 app.include_router(itens_routers.router)
 app.include_router(consumos_routers.router)
