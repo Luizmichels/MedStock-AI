@@ -1,14 +1,17 @@
 import logging
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI, Request
+from fastapi import Depends, FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
+from sqlalchemy import text
+from sqlalchemy.exc import SQLAlchemyError
+from sqlalchemy.orm import Session
+
 from app.core.config import settings
-from app.database import engine
 import app.models  # noqa: F401 — registra todos os modelos no metadata
-from app.database import Base
+from app.database import Base, engine, get_db
 
 from app.routers import (
     auth_routers,
@@ -22,6 +25,8 @@ from app.routers import (
     dashboard_routers,
     exportacoes_routers,
 )
+
+#teste pr
 
 logging.basicConfig(
     level=logging.INFO,
@@ -73,5 +78,24 @@ app.include_router(dashboard_routers.router)
 app.include_router(exportacoes_routers.router)
 
 @app.get("/health", tags=["Sistema"])
-def health():
-    return {"status": "ok"}
+def health(db: Session = Depends(get_db)):
+    try:
+        db.execute(text("SELECT 1"))
+    except SQLAlchemyError:
+        logging.getLogger(__name__).exception(
+            "Falha na conexão com o banco de dados durante o health check"
+        )
+
+        return JSONResponse(
+            status_code=503,
+            content={
+                "status": "degraded",
+                "database": "unavailable",
+            },
+        )
+
+    return {
+        "status": "ok",
+        "database": "ok",
+    }
+    
