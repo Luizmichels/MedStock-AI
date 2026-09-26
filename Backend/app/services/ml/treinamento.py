@@ -12,7 +12,7 @@ from sqlalchemy.orm import Session
 from app.models.consumo_tratado import ConsumoTratado
 from app.models.modelo_treinado import ModeloTreinado
 from app.services.ml.elegibilidade import separar_elegiveis
-from app.services.ml.estimadores import ALGORITMOS, Estimador
+from app.services.ml.estimadores import ALGORITMOS, Estimador, algoritmos_elegiveis
 from app.services.ml.validacao import (
     ResultadoAvaliacao,
     comparar_algoritmos,
@@ -76,15 +76,16 @@ def selecionar_algoritmo_por_item(
     n_dobras: int = 3,
     horizonte: int = 1,
 ) -> dict[int, ResultadoAvaliacao]:
-    """Para CADA item, avalia todos os algoritmos por walk-forward e escolhe o de
-    menor MAPE. A decisão é por item — itens diferentes podem ter algoritmos
-    diferentes (diverge do RFC 5.6.4, que seleciona um único pela média Classe A)."""
+    """Para CADA item, avalia por walk-forward apenas os algoritmos com histórico
+    suficiente (o mínimo varia por modelo) e escolhe o de menor MAE. A decisão é
+    por item — itens diferentes podem ter algoritmos diferentes."""
     selecao: dict[int, ResultadoAvaliacao] = {}
     for item_id, serie in series_por_item.items():
+        candidatos = algoritmos_elegiveis(len(serie), algoritmos) or ["sma"]
         resultados = comparar_algoritmos(
-            serie, algoritmos, n_dobras=n_dobras, horizonte=horizonte, fabrica=fabrica
+            serie, candidatos, n_dobras=n_dobras, horizonte=horizonte, fabrica=fabrica
         )
-        selecao[item_id] = selecionar_melhor(resultados, criterio="mape")
+        selecao[item_id] = selecionar_melhor(resultados, criterio="mae")
     return selecao
 
 
@@ -123,7 +124,7 @@ def treinar_empresa(
     n_dobras: int = 3,
     horizonte: int = 1,
 ) -> ModeloTreinado:
-    """Seleciona o melhor algoritmo POR ITEM (menor MAPE) sobre todos os itens
+    """Seleciona o melhor algoritmo POR ITEM (menor MAE) sobre todos os itens
     elegíveis e persiste como um único modelo ativo da empresa; a escolha de cada
     item fica registrada em `parametros["itens"]` e é usada na geração das previsões."""
     series_por_item = carregar_series_por_item(db, empresa_id)
@@ -171,7 +172,7 @@ def treinar_empresa(
 
     log_service.registrar(
         db, "treino", "info",
-        f"Modelo treinado com seleção por item (MAPE médio={mape})",
+        f"Modelo treinado com seleção por item (MAE médio={mae})",
         empresa_id=empresa_id,
         contexto={"selecao": "por_item", "n_itens": len(selecao)},
     )
