@@ -22,17 +22,6 @@ def gerar_pdf(df: pd.DataFrame, titulo: str, subtitulo: str = "") -> bytes:
     if df.empty:
         elementos.append(Paragraph("Nenhum dado disponível para o período.", estilos["Normal"]))
     else:
-        max_linhas_pdf = 5000
-        if len(df) > max_linhas_pdf:
-            elementos.append(
-                Paragraph(
-                    f"<b>Aviso:</b> Relatório limitado às primeiras {max_linhas_pdf} linhas. Para o histórico completo, exporte em formato Excel (.xlsx).",
-                    estilos["Normal"],
-                )
-            )
-            elementos.append(Spacer(1, 8))
-            df = df.iloc[:max_linhas_pdf]
-
         dados = [list(df.columns)] + df.astype(str).values.tolist()
         tabela = Table(dados, repeatRows=1)
         tabela.setStyle(
