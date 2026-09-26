@@ -23,8 +23,10 @@ services:
       - .env
     environment:
       DATABASE_URL: postgresql+psycopg://postgres:${POSTGRES_PASSWORD}@db:5432/medstock
-    expose:
-      - "8000"
+    # Porta publicada no host para acesso direto em desenvolvimento.
+    # Em produção, o acesso passa pelo proxy (80/443) e esta linha pode ser removida.
+    ports:
+      - "8000:8000"
     depends_on:
       db:
         condition: service_healthy
