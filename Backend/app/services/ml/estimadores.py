@@ -185,3 +185,20 @@ def criar(algoritmo: str, **params) -> Estimador:
     if algoritmo not in _FABRICAS:
         raise ValueError(f"Algoritmo desconhecido: {algoritmo!r}. Use um de {ALGORITMOS}.")
     return _FABRICAS[algoritmo](**params)
+
+
+# Histórico mínimo (em meses) que cada algoritmo precisa para ser avaliado.
+# SMA basta com poucos pontos; as árvores precisam dos lags (~13 meses); os
+# modelos sazonais precisam de ~2 ciclos completos (24 meses).
+MESES_MINIMOS_POR_ALGORITMO = {
+    "sma": 3,
+    "random_forest": 13,
+    "gradient_boosting": 13,
+    "sarima": 24,
+    "holt_winters": 24,
+}
+
+
+def algoritmos_elegiveis(n_meses: int, algoritmos=ALGORITMOS) -> list[str]:
+    """Algoritmos cujo histórico mínimo cabe em n_meses (o mínimo varia por modelo)."""
+    return [a for a in algoritmos if MESES_MINIMOS_POR_ALGORITMO.get(a, 3) <= n_meses]

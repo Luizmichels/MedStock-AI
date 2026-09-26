@@ -2,7 +2,6 @@ import re
 from datetime import date
 from unittest.mock import MagicMock
 
-import httpx
 import pytest
 from dateutil.relativedelta import relativedelta
 from sqlalchemy import create_engine, text
@@ -253,16 +252,3 @@ def csv_invalido() -> bytes:
         "MED001;Dipirona 500mg;100;250.50;Almoxarifado Central",
     ]
     return "\n".join(linhas).encode("utf-8")
-
-
-@pytest.fixture
-def feriados_mock(respx_mock):
-    """Intercepta GET api.feriados.dev/v1/holidays com payload fixo."""
-    payload = [
-        {"date": "2024-01-01", "name": "Confraternização Universal", "type": "national"},
-        {"date": "2024-12-25", "name": "Natal", "type": "national"},
-        {"date": "2024-03-08", "name": "Aniversário da Cidade", "type": "municipal"},
-    ]
-    rota = respx_mock.get(url__startswith=f"{settings.FERIADOSAPI_BASE_URL}/v1/holidays")
-    rota.mock(return_value=httpx.Response(200, json=payload))
-    return rota

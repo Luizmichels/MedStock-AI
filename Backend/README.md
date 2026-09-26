@@ -1,19 +1,71 @@
 # MedStock AI — Backend
 
-API de análise preditiva de consumo de insumos hospitalares, construída com FastAPI + SQLAlchemy + PostgreSQL.
+API de análise preditiva de consumo de insumos hospitalares, construída com **FastAPI + SQLAlchemy + PostgreSQL**. O sistema importa o histórico de consumo, classifica os itens (ABC/XYZ), treina modelos de séries temporais e gera previsões de demanda por item, além de dashboard e exportação de relatórios.
 
 ## Stack
 
 - **FastAPI** + **Uvicorn**
-- **SQLAlchemy** (ORM) + **PostgreSQL**
-- **JWT** (`python-jose`) para autenticação
-- **bcrypt** para hash de senha
-- Pandas / NumPy / LightGBM / statsmodels / skforecast — pipeline de dados e previsão (em desenvolvimento)
+- **SQLAlchemy** (ORM) + **PostgreSQL**, com **Alembic** para migrações
+- **JWT** (`python-jose`) para autenticação e **bcrypt** para hash de senha
+- **Pandas / NumPy** — pipeline de dados
+- **LightGBM / statsmodels / skforecast** — modelos de previsão
+- **reportlab / openpyxl** — exportação em PDF e Excel
+- **pytest / pytest-cov / respx** — testes e cobertura
+
+## Funcionalidades
+
+| Área | Rotas principais |
+|---|---|
+| **Autenticação** | `POST /auth/login`, `/auth/definir-senha`, `/auth/esqueci-senha`, `/auth/redefinir-senha`, `/auth/reenviar-ativacao` |
+| **Empresas / acesso** | solicitação pública de acesso (com rate limit), aprovação e gestão pelo super admin |
+| **Usuários** | gestão de usuários por empresa (isolamento de dados entre empresas) |
+| **Importação** | `POST /importacoes/upload` (CSV/Excel, processado em segundo plano), `GET /importacoes/` e `GET /importacoes/{id}` para acompanhar o status |
+| **Consulta** | `GET /itens/`, `GET /itens/{id}`, `GET /consumos/`, `GET /consumos/serie/{item_id}` (paginados) |
+| **Previsões (ML)** | `POST /previsoes/treinar`, `GET /previsoes/modelos`, `POST /previsoes/modelos/{id}/ativar`, `GET /previsoes/`, `GET /previsoes/itens-omitidos`, `GET /previsoes/status-treino` |
+| **Dashboard** | `GET /dashboard/resumo`, `/consumo-mensal`, `/consumo-por-local`, `/classificacao-abc`, `/abc-xyz`, `/top-itens` |
+| **Exportação** | `GET /exportacoes/previsoes\|consumo\|metricas?formato=pdf\|xlsx` |
+| **Sistema** | `GET /health` |
+
+Documentação interativa (Swagger) em `http://localhost:8000/docs`.
+
+### Módulo de Machine Learning
+
+O pipeline de previsão vive em `app/services/ml/` e é o núcleo do trabalho:
+
+- **Séries mensais por item**, com meses sem consumo preenchidos com zero (demanda intermitente é sinal, não dado faltante).
+- **Elegibilidade (RN06):** itens com menos de 3 meses de histórico ficam de fora do treino e são reportados em `/previsoes/itens-omitidos`.
+- **5 algoritmos:** SMA, SARIMA, Holt-Winters, Random Forest e Gradient Boosting.
+- **Validação walk-forward** (treino expansivo, sem vazamento temporal), comparando os algoritmos por MAPE, MAE e RMSE.
+- **Seleção por item:** cada item elegível é previsto pelo algoritmo de menor MAPE *para aquele item*; a escolha fica registrada no modelo ativo.
+- O treino roda em segundo plano (`BackgroundTasks`) e nunca dentro do request.
 
 ## Pré-requisitos
 
 - [Docker Desktop](https://www.docker.com/products/docker-desktop/) (forma recomendada de rodar o projeto)
-- Python 3.14 (só necessário se for rodar sem Docker)
+- Python 3.12 ou superior (só necessário se for rodar/testar sem Docker)
+
+## Configuração (`.env`)
+
+Crie um arquivo `.env` dentro de `Backend/` com as seguintes variáveis:
+
+| Variável | Descrição |
+|---|---|
+| `DATABASE_URL` | String de conexão do PostgreSQL (ex: `postgresql+psycopg://postgres:SENHA@localhost:5432/medstock`) |
+| `TEST_DATABASE_URL` | *(opcional)* Banco usado pelos testes. Se ausente, a suíte usa SQLite em memória |
+| `SECRET_KEY` | Chave usada para assinar os tokens JWT |
+| `ALGORITHM` | Algoritmo do JWT (default `HS256`) |
+| `ACCESS_TOKEN_EXPIRE_MINUTES` | Validade do token de login, em minutos (default `60`) |
+| `DEFINIR_SENHA_TOKEN_EXPIRE_MINUTES` | Validade dos links de definição/redefinição de senha, em minutos (default `2880` = 48h) |
+| `FRONTEND_URL` | URL base do frontend, usada nos links de e-mail e no CORS (default `http://localhost:3000`) |
+| `SUPER_ADMIN_EMAIL` | E-mail do super admin criado automaticamente no primeiro start |
+| `SUPER_ADMIN_SENHA` | Senha do super admin criado automaticamente no primeiro start |
+| `EMAIL_REMETENTE` | E-mail usado para enviar as notificações (ex: Gmail) |
+| `SENHA_EMAIL` | Senha de app do e-mail remetente (no Gmail, precisa ser uma [senha de app](https://myaccount.google.com/apppasswords), não a senha normal da conta) |
+| `SMTP_HOST` / `SMTP_PORT` | Servidor SMTP (default `smtp.gmail.com:587`) |
+| `POSTGRES_PASSWORD` | Senha do usuário `postgres` — usada pelo `docker-compose.yml` para subir o banco (deve ser a mesma de `DATABASE_URL`) |
+| `DOMINIO` | *(produção)* Domínio usado pelo proxy Caddy para emitir o certificado HTTPS (default `localhost`) |
+
+O `.env` nunca deve ser commitado (já está no `.gitignore`).
 
 ## Rodando com Docker (recomendado)
 
@@ -23,19 +75,18 @@ Com o Docker Desktop aberto e o `.env` configurado:
 docker compose up --build -d
 ```
 
-Isso sobe dois serviços:
+Sobe três serviços:
 - **`db`**: PostgreSQL 16, com os dados persistidos em um volume nomeado (`postgres_data`).
-- **`api`**: build da aplicação FastAPI, na porta `8000`.
+- **`api`**: aplicação FastAPI na porta `8000`. No start, o container roda `alembic upgrade head` (aplica as migrações) e sobe o Uvicorn.
+- **`proxy`**: Caddy como proxy reverso, com HTTPS automático (portas 80/443).
 
-No primeiro start, a aplicação cria automaticamente todas as tabelas e o usuário super admin (a partir de `SUPER_ADMIN_EMAIL`/`SUPER_ADMIN_SENHA`).
+No primeiro start, o schema é criado pelas migrações e o usuário super admin é gerado a partir de `SUPER_ADMIN_EMAIL`/`SUPER_ADMIN_SENHA`.
 
 Verifique se subiu corretamente:
 ```bash
 curl http://localhost:8000/health
 # {"status":"ok"}
 ```
-
-Documentação interativa (Swagger): http://localhost:8000/docs
 
 ### Comandos úteis
 
@@ -47,7 +98,16 @@ Documentação interativa (Swagger): http://localhost:8000/docs
 | `docker compose down` | Para os containers (mantém os dados do banco) |
 | `docker compose down -v` | Para os containers **e apaga os dados do banco** (reset completo) |
 
-> **Atenção**: como o projeto ainda não usa Alembic, o schema do banco é criado via `Base.metadata.create_all()` no startup — isso só cria tabelas que não existem, nunca altera tabelas já existentes. Se você mudar um modelo (nova coluna, etc.), é necessário resetar o banco (`docker compose down -v` seguido de `docker compose up -d`) para o schema novo ser aplicado.
+## Migrações (Alembic)
+
+O schema é versionado com Alembic (pasta `alembic/`). Em Docker, as migrações são aplicadas automaticamente no start da API; localmente:
+
+```bash
+alembic upgrade head                               # aplica todas as migrações
+alembic revision --autogenerate -m "descricao"     # gera uma nova migração a partir dos modelos
+```
+
+Por padrão o Alembic usa a `DATABASE_URL` do `.env`. É possível apontar para outro banco com a variável `ALEMBIC_DATABASE_URL`.
 
 ## Rodando sem Docker
 
@@ -55,6 +115,7 @@ Documentação interativa (Swagger): http://localhost:8000/docs
 python -m venv venv
 venv\Scripts\activate          # Windows
 pip install -r requirements.txt
+alembic upgrade head
 uvicorn app.main:app --reload
 ```
 
@@ -62,18 +123,20 @@ Nesse caso, `DATABASE_URL` no `.env` deve apontar para um PostgreSQL acessível 
 
 ## Rodando os testes
 
-Os testes rodam contra um PostgreSQL de verdade (não um banco simulado), em um banco separado (`medstock_test`) dentro do mesmo Postgres do `docker-compose.yml` — assim eles validam de verdade a conexão, a criação das tabelas e as constraints (`NOT NULL`, `unique`), sem tocar no banco de desenvolvimento.
+A suíte usa **SQLite em memória por padrão** — zero configuração, rápida e determinística. Cada teste recria o schema, e as chamadas de rede (feriados, SMTP) são mockadas, então nenhum e-mail real é enviado nem há dependência de serviços externos.
 
 ```bash
-docker compose up -d db     # garante que o Postgres está disponível em localhost:5432
 pip install -r requirements.txt
-pytest -v
+pytest                      # roda tudo com cobertura
+pytest -m "not lento"       # pula os testes que treinam modelos de verdade (mais rápido)
 ```
 
-O banco `medstock_test` é criado automaticamente na primeira execução, e cada teste roda dentro de uma transação que é desfeita (`rollback`) ao final — então rodar a suíte várias vezes seguidas não deixa dados residuais nem exige resetar o banco manualmente. Os e-mails de aprovação de solicitação são interceptados (mock) durante os testes, então nenhum e-mail real é enviado.
+- **Cobertura:** o `pytest.ini` já exige cobertura mínima de **75%** (`--cov-fail-under=75`); o relatório HTML fica em `htmlcov/`. O projeto tem mais de 230 testes e cobertura acima de 90%.
+- **Marcador `lento`:** os poucos testes que treinam LightGBM/SARIMA de verdade são marcados com `@pytest.mark.lento`; a orquestração é testada com um estimador falso, mantendo a suíte rápida no dia a dia.
+- **Fidelidade com Postgres:** para rodar contra um PostgreSQL real (como no CI), defina `TEST_DATABASE_URL` apontando para o banco desejado — o `conftest` detecta e usa esse banco no lugar do SQLite.
 
-Cobertura atual ([tests/](tests/)):
-- `test_database.py` — conexão com o banco, criação de todas as tabelas, e as constraints que já causaram bugs antes (`endereco` `NOT NULL`, `email` único).
-- `test_auth.py` — login (sucesso, senha errada, usuário inativo) e o fluxo de `/auth/definir-senha` (incluindo o link não poder ser reutilizado).
-- `test_empresas.py` — envio de solicitação (validação), permissões de super admin, e o fluxo completo de aprovação (cria empresa + usuário admin + dispara e-mail).
-- `test_usuarios.py` — permissões de admin, isolamento de dados entre empresas diferentes, e-mail duplicado, desativação.
+A suíte cobre o pipeline de importação, classificação ABC/XYZ, e-mail, autenticação e recuperação de senha, camada de consulta, o módulo de ML (features, métricas, elegibilidade, validação, treino e previsão), dashboard, exportação e rastreabilidade (logs).
+
+## Integração contínua
+
+O workflow em `.github/workflows/ci.yml` roda a suíte com cobertura a cada push/PR na `main` e falha se a cobertura ficar abaixo de 75%.

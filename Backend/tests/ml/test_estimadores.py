@@ -45,3 +45,9 @@ def test_todos_estimadores_treinam_e_preveem(algoritmo):
     previsao = estimador.prever(6)
     assert len(previsao) == 6
     assert all(math.isfinite(v) for v in previsao)
+
+
+def test_algoritmos_elegiveis_varia_por_historico():
+    assert est.algoritmos_elegiveis(3) == ["sma"]
+    assert set(est.algoritmos_elegiveis(13)) == {"sma", "random_forest", "gradient_boosting"}
+    assert set(est.algoritmos_elegiveis(24)) == set(est.ALGORITMOS)
