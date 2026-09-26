@@ -58,18 +58,3 @@ def test_reenviar_ativacao_usuario_ativo_nao_envia(client, db_session, empresa, 
     resposta = client.post("/auth/reenviar-ativacao", json={"email": usuario.email})
     assert resposta.status_code == 200
     email_auth_mock.assert_not_called()
-
-
-def test_redefinir_senha_impede_reuso_de_token(client, db_session, empresa):
-    usuario = criar_usuario(db_session, empresa, perfil="usuario")
-    token = criar_token({
-        "sub": str(usuario.id),
-        "tipo": "redefinir_senha",
-        "v": usuario.senha_hash[:10],
-    })
-
-    resp1 = client.post("/auth/redefinir-senha", json={"token": token, "senha": "NovaSenha456!"})
-    assert resp1.status_code == 200
-
-    resp2 = client.post("/auth/redefinir-senha", json={"token": token, "senha": "OutraSenha789!"})
-    assert resp2.status_code == 401

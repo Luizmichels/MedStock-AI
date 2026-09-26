@@ -118,7 +118,7 @@ def _limpar_dados(df: pd.DataFrame) -> Tuple[pd.DataFrame, list]:
     for col in ("quantidade", "valor"):
         numerico = _numerico(df[col])
         invalido = numerico.isna()
-        nao_positivo = (~invalido) & (numerico <= 0)
+        nao_positivo = (~invalido)
         for idx in df.index[invalido]:
             erros.append(f"linha {_linha(idx)}: {col} inválid{'a' if col == 'quantidade' else 'o'} '{df.at[idx, col]}'")
         for idx in df.index[nao_positivo]:

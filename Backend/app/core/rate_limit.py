@@ -20,11 +20,7 @@ class LimitadorDeTaxa:
 
     def __call__(self, request: Request) -> None:
         agora = time.monotonic()
-        encaminhado = request.headers.get("x-forwarded-for")
-        if encaminhado:
-            ip = encaminhado.split(",")[0].strip()
-        else:
-            ip = request.client.host if request.client else "desconhecido"
+        ip = request.client.host if request.client else "desconhecido"
         fila = self._acessos[ip]
         while fila and agora - fila[0] > self.janela:
             fila.popleft()
