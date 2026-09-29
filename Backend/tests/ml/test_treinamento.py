@@ -4,6 +4,7 @@ from datetime import date
 
 import numpy as np
 import pytest
+from sqlalchemy import func
 
 from app.models.consumo_tratado import ConsumoTratado
 from app.models.itens import Item
@@ -134,6 +135,43 @@ def test_gerar_previsoes_regenera_substitui_anteriores(db_session, empresa, item
 
     total = db_session.query(Previsao).filter(Previsao.empresa_id == empresa.id).count()
     assert total == 6
+
+
+def test_gerar_previsoes_ancora_todos_na_referencia_comum(db_session, empresa):
+    # A vai até 2024-03; B (item que "parou") vai até 2024-01. Ambos elegíveis
+    # (>=3 meses próprios). Todos devem prever a partir da referência comum 2024-03.
+    a = Item(empresa_id=empresa.id, codigo_item="AA", descricao_item="A")
+    b = Item(empresa_id=empresa.id, codigo_item="BB", descricao_item="B")
+    db_session.add_all([a, b])
+    db_session.flush()
+    for mes in (1, 2, 3):
+        db_session.add(ConsumoTratado(
+            empresa_id=empresa.id, item_id=a.id, periodo=date(2024, mes, 1),
+            quantidade_total=10.0, valor_total=100.0, local_estoque=None,
+        ))
+    for ano, mes in ((2023, 11), (2023, 12), (2024, 1)):
+        db_session.add(ConsumoTratado(
+            empresa_id=empresa.id, item_id=b.id, periodo=date(ano, mes, 1),
+            quantidade_total=5.0, valor_total=50.0, local_estoque=None,
+        ))
+    db_session.commit()
+
+    modelo = treinamento.treinar_empresa(db_session, empresa.id, fabrica=fabrica_fake)
+    predicao.gerar_previsoes(db_session, empresa.id, modelo, horizonte=6, fabrica=fabrica_fake)
+
+    for item_obj in (a, b):
+        primeiro = db_session.query(func.min(Previsao.periodo)).filter(
+            Previsao.empresa_id == empresa.id, Previsao.item_id == item_obj.id
+        ).scalar()
+        assert primeiro == date(2024, 4, 1)  # referência comum (2024-03) + 1 mês
+
+
+def test_treinar_empresa_metrica_cabecalho_e_mediana(db_session, empresa, item, serie_consumo):
+    modelo = treinamento.treinar_empresa(db_session, empresa.id, fabrica=fabrica_fake)
+    metricas = modelo.parametros["metricas"]
+    assert {"mae_mediano", "mae_medio", "rmse_mediano", "mape_mediano"} <= set(metricas)
+    # A coluna do modelo espelha a mediana (métrica-cabeçalho).
+    assert modelo.mae == metricas["mae_mediano"]
 
 
 def test_gerar_previsoes_nao_preve_item_omitido(db_session, empresa, item, serie_consumo):
