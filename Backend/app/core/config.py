@@ -2,6 +2,12 @@
 from pydantic_settings import BaseSettings
 
 class Settings(BaseSettings):
+    # Ambiente de execução: "desenvolvimento" | "producao". Rotas de conveniência
+    # para testes (ex.: /importacoes/upload-teste) só respondem fora de produção.
+    AMBIENTE: str = "desenvolvimento"
+    # Tamanho máximo (MB) aceito no upload de importação. Default conservador
+    # para produção; em desenvolvimento pode ser elevado via .env.
+    UPLOAD_MAX_MB: int = 50
     DATABASE_URL: str
     # Banco usado pela suíte de testes. Se ausente, o conftest cai para SQLite
     # em memória; defina para um Postgres real no CI para fidelidade de produção.

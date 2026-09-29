@@ -20,6 +20,19 @@ from app.models.usuario import Usuario
 from app.services.ml.elegibilidade import separar_elegiveis
 from app.services.ml.predicao import gerar_previsoes
 from app.services.ml.treinamento import carregar_series_por_item, treinar_empresa
+from app.services.ml.intermitencia import analisar_empresa, resumir
+from app.services.ml import previsao_diaria as diaria
+from app.models.previsao_diaria import PrevisaoDiaria
+from app.schemas.intermitencia_schemas import (
+    AnaliseIntermitenciaResponse,
+    IntermitenciaItemResponse,
+)
+from app.schemas.previsao_diaria_schemas import (
+    HorizontesDiarios,
+    PontoDiario,
+    PrevisaoDiariaDetalhe,
+    ResumoDiarioItem,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -27,6 +40,7 @@ router = APIRouter(prefix="/previsoes", tags=["Previsões"])
 
 # Estado em memória dos treinos em andamento (processo único — TCC).
 _TREINOS_EM_ANDAMENTO: set[int] = set()
+_DIARIOS_EM_ANDAMENTO: set[int] = set()
 
 
 def _executar_treino(empresa_id: int) -> None:
@@ -150,4 +164,93 @@ def status_treino(
     return StatusTreinoResponse(
         em_andamento=current_user.empresa_id in _TREINOS_EM_ANDAMENTO,
         ultimo_modelo=ultimo,
+    )
+
+
+def _executar_previsao_diaria(empresa_id: int) -> None:
+    db = SessionLocal()
+    try:
+        diaria.gerar_previsoes_diarias(db, empresa_id)
+    except Exception:  # pragma: no cover - proteção do worker de background
+        logger.exception("Falha na previsão diária empresa=%s", empresa_id)
+    finally:
+        _DIARIOS_EM_ANDAMENTO.discard(empresa_id)
+        db.close()
+
+
+@router.post("/diaria/gerar", status_code=202)
+def gerar_diaria(
+    tarefas: BackgroundTasks,
+    current_user: Usuario = Depends(require_admin),
+):
+    """Gera as previsões diárias (Croston/SBA para itens intermitentes,
+    média móvel sazonal para os regulares) e os horizontes 7/15/30 dias."""
+    empresa_id = current_user.empresa_id
+    if empresa_id in _DIARIOS_EM_ANDAMENTO:
+        raise HTTPException(status_code=409, detail="Já há uma geração diária em andamento.")
+    _DIARIOS_EM_ANDAMENTO.add(empresa_id)
+    tarefas.add_task(_executar_previsao_diaria, empresa_id)
+    return {"detail": "Previsão diária iniciada."}
+
+
+@router.get("/diaria/resumo", response_model=list[ResumoDiarioItem])
+def resumo_diario(
+    item_id: int | None = Query(None),
+    db: Session = Depends(get_db),
+    current_user: Usuario = Depends(get_current_user),
+):
+    """Somatórios previstos por item nos horizontes próximo dia / 7 / 15 / 30 dias."""
+    linhas = diaria.resumo_por_item(db, current_user.empresa_id, item_id)
+    return [ResumoDiarioItem(**linha) for linha in linhas]
+
+
+@router.get("/diaria/{item_id}", response_model=PrevisaoDiariaDetalhe)
+def detalhe_diario(
+    item_id: int,
+    db: Session = Depends(get_db),
+    current_user: Usuario = Depends(get_current_user),
+):
+    """Curva diária prevista de um item (os ``HORIZONTE_DIARIO`` dias) e os
+    horizontes agregados."""
+    pontos = (
+        db.query(PrevisaoDiaria)
+        .filter(
+            PrevisaoDiaria.empresa_id == current_user.empresa_id,
+            PrevisaoDiaria.item_id == item_id,
+        )
+        .order_by(PrevisaoDiaria.data)
+        .all()
+    )
+    if not pontos:
+        raise HTTPException(status_code=404, detail="Sem previsão diária para o item.")
+
+    resumo = diaria.resumo_por_item(db, current_user.empresa_id, item_id)[0]
+    return PrevisaoDiariaDetalhe(
+        item_id=item_id,
+        metodo=resumo["metodo"],
+        base=resumo["base"],
+        horizontes=HorizontesDiarios(
+            proximo_dia=resumo["proximo_dia"],
+            sete_dias=resumo["sete_dias"],
+            quinze_dias=resumo["quinze_dias"],
+            trinta_dias=resumo["trinta_dias"],
+        ),
+        dias=[
+            PontoDiario(data=p.data, quantidade_prevista=p.quantidade_prevista)
+            for p in pontos
+        ],
+    )
+
+
+@router.get("/analise-intermitencia", response_model=AnaliseIntermitenciaResponse)
+def analise_intermitencia(
+    db: Session = Depends(get_db),
+    current_user: Usuario = Depends(get_current_user),
+):
+    """Classificação SBC: diagnostica a intermitência da demanda de cada
+    item para embasar a decisão de granularidade (diária vs mensal)."""
+    resultados = analisar_empresa(db, current_user.empresa_id)
+    return AnaliseIntermitenciaResponse(
+        resumo=resumir(resultados),
+        itens=[IntermitenciaItemResponse.model_validate(r) for r in resultados],
     )

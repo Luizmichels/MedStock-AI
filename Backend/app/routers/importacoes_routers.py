@@ -2,6 +2,7 @@ import logging
 from fastapi import APIRouter, BackgroundTasks, Depends, UploadFile, File, HTTPException
 from sqlalchemy.orm import Session
 
+from app.core.config import settings
 from app.database import SessionLocal, get_db
 from app.dependencies import get_current_user, require_admin
 from app.models.importacoes import Importacao
@@ -14,7 +15,7 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/importacoes", tags=["Importações"])
 
-TAMANHO_MAXIMO_BYTES = 50 * 1024 * 1024  # 50 MB
+TAMANHO_MAXIMO_BYTES = settings.UPLOAD_MAX_MB * 1024 * 1024
 EXTENSOES_PERMITIDAS = {"csv", "xls", "xlsx"}
 
 
@@ -34,6 +35,23 @@ def _processar_importacao_background(
         db.close()
 
 
+def _validar_extensao(nome_arquivo: str | None) -> None:
+    extensao = nome_arquivo.rsplit(".", 1)[-1].lower() if nome_arquivo else ""
+    if extensao not in EXTENSOES_PERMITIDAS:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Formato não suportado: .{extensao}. Use CSV ou Excel (.xls, .xlsx).",
+        )
+
+
+def _validar_tamanho(conteudo: bytes) -> None:
+    if len(conteudo) > TAMANHO_MAXIMO_BYTES:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Arquivo excede o limite de {settings.UPLOAD_MAX_MB} MB.",
+        )
+
+
 @router.post("/upload", response_model=ImportacaoResponse, status_code=202)
 async def upload(
     tarefas: BackgroundTasks,
@@ -41,16 +59,10 @@ async def upload(
     db: Session = Depends(get_db),
     current_user: Usuario = Depends(require_admin),
 ):
-    extensao = arquivo.filename.rsplit(".", 1)[-1].lower() if arquivo.filename else ""
-    if extensao not in EXTENSOES_PERMITIDAS:
-        raise HTTPException(
-            status_code=400,
-            detail=f"Formato não suportado: .{extensao}. Use CSV ou Excel (.xls, .xlsx).",
-        )
+    _validar_extensao(arquivo.filename)
 
     conteudo = await arquivo.read()
-    if len(conteudo) > TAMANHO_MAXIMO_BYTES:
-        raise HTTPException(status_code=400, detail="Arquivo excede o limite de 50 MB.")
+    _validar_tamanho(conteudo)
 
     importacao = criar_importacao_processando(
         db, arquivo.filename, current_user.empresa_id, current_user.id
@@ -60,7 +72,6 @@ async def upload(
         importacao.id, conteudo, arquivo.filename, current_user.empresa_id,
     )
     return importacao
-
 
 @router.get("/", response_model=list[ImportacaoResponse])
 def listar(

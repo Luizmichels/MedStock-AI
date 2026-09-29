@@ -1,4 +1,4 @@
-"""Geração de previsões multi-step e persistência (RF08, RN06).
+"""Geração de previsões multi-step e persistência.
 
 Usa o algoritmo do modelo ativo para projetar ``horizonte`` meses à frente para
 cada item elegível, de forma recursiva, com um intervalo simples de incerteza.
@@ -17,6 +17,8 @@ from app.services.ml.elegibilidade import separar_elegiveis
 from app.services.ml.estimadores import ALGORITMOS, Estimador, criar
 from app.services.ml.treinamento import (
     carregar_series_por_item,
+    estender_ate_referencia,
+    periodo_referencia,
     ultimo_periodo_por_item,
 )
 
@@ -48,17 +50,21 @@ def gerar_previsoes(
     series_por_item = carregar_series_por_item(db, empresa_id)
     elegiveis, _omitidos = separar_elegiveis(series_por_item)
     ultimos = ultimo_periodo_por_item(db, empresa_id)
+    # Origem COMUM: todas as previsões partem do último mês da empresa, então todo
+    # item projeta a mesma janela futura (RF08).
+    referencia = periodo_referencia(db, empresa_id)
 
     # Regeneração completa: descarta as previsões anteriores da empresa.
     db.query(Previsao).filter(Previsao.empresa_id == empresa_id).delete()
 
     novas: list[Previsao] = []
     for item_id, serie in elegiveis.items():
+        serie = estender_ate_referencia(serie, ultimos[item_id], referencia)
         estimador = construir(_algoritmo_do_item(modelo, item_id))
         estimador.fit(serie)
         previsto = estimador.prever(horizonte)
 
-        base = ultimos[item_id]
+        base = referencia
         for passo, valor in enumerate(previsto, start=1):
             quantidade = max(float(valor), 0.0)
             periodo = base + relativedelta(months=passo)

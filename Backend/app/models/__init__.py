@@ -10,6 +10,7 @@ from app.models.consumo_tratado import ConsumoTratado
 from app.models.classificacao_abc import ClassificacaoABC
 from app.models.modelo_treinado import ModeloTreinado
 from app.models.previsoes import Previsao
+from app.models.previsao_diaria import PrevisaoDiaria
 from app.models.feriados import Feriado
 from app.models.logs_execucao import LogExecucao
 
@@ -24,6 +25,7 @@ __all__ = [
     "ClassificacaoABC",
     "ModeloTreinado",
     "Previsao",
+    "PrevisaoDiaria",
     "Feriado",
     "LogExecucao",
 ]

@@ -1,4 +1,4 @@
-"""Testes do pipeline de importação (RF04 / FA02)."""
+"""Testes do pipeline de importação."""
 
 from datetime import date
 from io import BytesIO
@@ -9,6 +9,7 @@ import pytest
 from app.models.consumo import Consumo
 from app.models.consumo_tratado import ConsumoTratado
 from app.models.importacoes import Importacao
+from app.models.itens import Item
 from app.services import data_pipeline_service as dp
 
 
@@ -28,6 +29,25 @@ def test_ler_csv_com_separador_virgula_e_latin1():
     # Cai no fallback vírgula+latin-1 (uma única coluna no parse ';').
     assert "descricao" in df.columns
     assert df.iloc[0]["descricao"] == "Solução"
+
+
+def test_ler_csv_virgula_utf8_multicoluna():
+    # Layout do sistema de origem: vírgula + aspas + utf-8 (não deve colapsar
+    # numa coluna só ao testar ';').
+    conteudo = '"CD_MATERIAL","DT_MES","QT_CONSUMO"\n"MED001","2024-01","10"'.encode("utf-8")
+    df = dp._ler_arquivo(conteudo, "consumo.csv")
+    assert list(df.columns) == ["CD_MATERIAL", "DT_MES", "QT_CONSUMO"]
+    assert df.iloc[0]["CD_MATERIAL"] == "MED001"
+
+
+def test_normalizar_colunas_layout_origem():
+    df = pd.DataFrame(columns=[
+        "CD_MATERIAL", "DS_MATERIAL", "DT_MES",
+        "QT_CONSUMO", "VL_CONSUMO", "DS_CENTRO_CUSTO",
+    ])
+    dp._normalizar_colunas(df)
+    dp._validar_colunas(df)  # não deve levantar
+    assert dp.COLUNAS_OBRIGATORIAS <= set(df.columns)
 
 
 def test_ler_excel_xlsx():
@@ -79,6 +99,16 @@ def test_parsear_data_aceita_quatro_formatos():
     assert dp._parsear_data("2024-03-15") == esperado
     assert dp._parsear_data("15-03-2024") == esperado
     assert dp._parsear_data("2024/03/15") == esperado
+
+
+@pytest.mark.parametrize("valor,esperado", [
+    ("2024-01", date(2024, 1, 1)),
+    ("01/2024", date(2024, 1, 1)),
+    ("2024/01", date(2024, 1, 1)),
+    ("202401", date(2024, 1, 1)),
+])
+def test_parsear_data_aceita_competencia_mensal(valor, esperado):
+    assert dp._parsear_data(valor) == esperado
 
 
 def test_parsear_data_invalida_retorna_none():
@@ -213,6 +243,64 @@ def test_processar_arquivo_status_concluido(db_session, empresa, usuario_admin, 
     )
     assert importacao.status == "concluido"
     assert importacao.registros_validos == 3
+
+
+def test_processar_arquivo_layout_origem_virgula_e_mes(db_session, empresa, usuario_admin):
+    # CSV real: vírgula, aspas, cabeçalho CD_/DS_/QT_/VL_ e DT_MES mensal.
+    conteudo = (
+        '"CD_MATERIAL","DS_MATERIAL","DT_MES","QT_CONSUMO","VL_CONSUMO","DS_CENTRO_CUSTO"\n'
+        '"MED001","Dipirona 500mg","2024-01","100","250.50","Farmacia"\n'
+        '"MED001","Dipirona 500mg","2024-02","80","200.00","Farmacia"\n'
+    ).encode("utf-8")
+    importacao = dp.processar_arquivo(
+        db_session, conteudo, "consumo.csv", empresa.id, usuario_admin.id
+    )
+    assert importacao.status == "concluido"
+    assert importacao.registros_validos == 2
+    consumos = db_session.query(Consumo).filter(Consumo.empresa_id == empresa.id).all()
+    assert {c.data for c in consumos} == {date(2024, 1, 1), date(2024, 2, 1)}
+
+
+def test_processar_arquivo_em_lotes_grava_tudo_e_reusa_item(
+    db_session, empresa, usuario_admin, monkeypatch
+):
+    # Força 3 lotes (5 linhas / lote de 2) para exercitar o streaming.
+    monkeypatch.setattr(dp, "TAMANHO_LOTE", 2)
+    linhas = ["codigo_item;descricao_item;data;quantidade;valor;local_estoque"]
+    for i in range(5):
+        linhas.append(f"MED001;Dipirona;0{i + 1}/01/2024;{10 + i};{100 + i};Central")
+    conteudo = "\n".join(linhas).encode("utf-8")
+
+    importacao = dp.processar_arquivo(
+        db_session, conteudo, "consumo.csv", empresa.id, usuario_admin.id
+    )
+    assert importacao.status == "concluido"
+    assert importacao.registros_validos == 5
+    assert db_session.query(Consumo).filter(Consumo.empresa_id == empresa.id).count() == 5
+    # Mesmo código em todos os lotes -> um único item (cache em memória).
+    assert db_session.query(Item).filter(Item.empresa_id == empresa.id).count() == 1
+
+
+def test_processar_arquivo_em_lotes_preserva_numero_de_linha_global(
+    db_session, empresa, usuario_admin, monkeypatch
+):
+    monkeypatch.setattr(dp, "TAMANHO_LOTE", 2)
+    linhas = [
+        "codigo_item;descricao_item;data;quantidade;valor;local_estoque",
+        "MED001;A;01/01/2024;10;100;Central",   # linha 2 (válida)
+        "MED002;B;02/01/2024;-5;100;Central",   # linha 3 (quantidade negativa)
+        "MED003;C;03/01/2024;10;100;Central",   # linha 4 (válida)
+        "MED004;D;data_ruim;10;100;Central",    # linha 5 (data inválida) - outro lote
+    ]
+    conteudo = "\n".join(linhas).encode("utf-8")
+
+    importacao = dp.processar_arquivo(
+        db_session, conteudo, "consumo.csv", empresa.id, usuario_admin.id
+    )
+    assert importacao.registros_validos == 2
+    assert importacao.registros_invalidos == 2
+    assert any("linha 3" in e for e in importacao.erros)
+    assert any("linha 5" in e for e in importacao.erros)
 
 
 def test_processar_arquivo_com_erro_marca_status_erro(db_session, empresa, usuario_admin, csv_invalido):

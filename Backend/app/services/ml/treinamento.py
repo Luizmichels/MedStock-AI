@@ -63,9 +63,41 @@ def ultimo_periodo_por_item(db: Session, empresa_id: int) -> dict[int, date]:
     return {item_id: periodo for item_id, periodo in linhas}
 
 
+def periodo_referencia(db: Session, empresa_id: int) -> date | None:
+    """Último mês com dados na empresa, origem COMUM das previsões, para que
+    todos os itens projetem a mesma janela futura (evita previsão ancorada no
+    último mês de cada item, que caía no passado para itens descontinuados)."""
+    return (
+        db.query(func.max(ConsumoTratado.periodo))
+        .filter(ConsumoTratado.empresa_id == empresa_id)
+        .scalar()
+    )
+
+
+def _meses_entre(inicio: date, fim: date) -> int:
+    return (fim.year - inicio.year) * 12 + (fim.month - inicio.month)
+
+
+def estender_ate_referencia(
+    serie: np.ndarray, ultimo_periodo: date, referencia: date
+) -> np.ndarray:
+    """Completa a série do item com zeros do seu último mês até a referência
+    comum. Assim um item que parou de ser consumido leva esses zeros para a
+    previsão (demanda tende a zero) em vez de projetar a partir do mês antigo."""
+    faltam = _meses_entre(ultimo_periodo, referencia)
+    if faltam > 0:
+        serie = np.concatenate([np.asarray(serie, dtype=float), np.zeros(faltam)])
+    return serie
+
+
 def _media_sem_nan(valores: list[float]) -> float:
     valores = [v for v in valores if not math.isnan(v)]
     return float(np.mean(valores)) if valores else float("nan")
+
+
+def _mediana_sem_nan(valores: list[float]) -> float:
+    valores = [v for v in valores if not math.isnan(v)]
+    return float(np.median(valores)) if valores else float("nan")
 
 
 def selecionar_algoritmo_por_item(
@@ -77,8 +109,8 @@ def selecionar_algoritmo_por_item(
     horizonte: int = 1,
 ) -> dict[int, ResultadoAvaliacao]:
     """Para CADA item, avalia por walk-forward apenas os algoritmos com histórico
-    suficiente (o mínimo varia por modelo) e escolhe o de menor MAE. A decisão é
-    por item — itens diferentes podem ter algoritmos diferentes."""
+    suficiente e escolhe o de menor MAE. A decisão é por item, itens diferentes podem
+    ter algoritmos diferentes."""
     selecao: dict[int, ResultadoAvaliacao] = {}
     for item_id, serie in series_por_item.items():
         candidatos = algoritmos_elegiveis(len(serie), algoritmos) or ["sma"]
@@ -100,7 +132,7 @@ def desativar_modelos_anteriores(db: Session, empresa_id: int) -> None:
 
 
 def ativar_modelo(db: Session, empresa_id: int, modelo_id: int) -> ModeloTreinado | None:
-    """Ativa um modelo específico e desativa os demais da empresa (RF11)."""
+    """Ativa um modelo específico e desativa os demais da empresa."""
     modelo = (
         db.query(ModeloTreinado)
         .filter(ModeloTreinado.id == modelo_id, ModeloTreinado.empresa_id == empresa_id)
@@ -136,10 +168,18 @@ def treinar_empresa(
         elegiveis, algoritmos=algoritmos, fabrica=fabrica, n_dobras=n_dobras, horizonte=horizonte
     )
     melhores = list(selecao.values())
-    # Métricas do modelo = média das métricas do melhor algoritmo de cada item.
-    mae = _media_sem_nan([r.mae for r in melhores])
-    rmse = _media_sem_nan([r.rmse for r in melhores])
-    mape = _media_sem_nan([r.mape for r in melhores])
+    # Métrica-cabeçalho do modelo = MEDIANA das métricas por item (o item típico)
+    mae = _mediana_sem_nan([r.mae for r in melhores])
+    rmse = _mediana_sem_nan([r.rmse for r in melhores])
+    mape = _mediana_sem_nan([r.mape for r in melhores])
+    metricas_resumo = {
+        "mae_mediano": _nan_para_none(mae),
+        "rmse_mediano": _nan_para_none(rmse),
+        "mape_mediano": _nan_para_none(mape),
+        "mae_medio": _nan_para_none(_media_sem_nan([r.mae for r in melhores])),
+        "rmse_medio": _nan_para_none(_media_sem_nan([r.rmse for r in melhores])),
+        "mape_medio": _nan_para_none(_media_sem_nan([r.mape for r in melhores])),
+    }
 
     desativar_modelos_anteriores(db, empresa_id)
     modelo = ModeloTreinado(
@@ -152,6 +192,7 @@ def treinar_empresa(
         parametros={
             "selecao": "por_item",
             "n_itens_avaliados": len(selecao),
+            "metricas": metricas_resumo,
             "itens": {
                 str(item_id): {
                     "algoritmo": r.algoritmo,
