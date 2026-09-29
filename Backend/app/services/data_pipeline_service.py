@@ -22,7 +22,11 @@ COLUNAS_OBRIGATORIAS = {
     "local_estoque",
 }
 
-# Mapeamentos alternativos de nomes de coluna aceitos nos arquivos
+# Nº de linhas processadas e gravadas por lote.
+TAMANHO_LOTE = 15_000
+MAX_ERROS_REPORTADOS = 1_000
+
+# Mapeamentos alternativos de nomes de coluna aceitos nos arquivos.
 _ALIAS_COLUNAS = {
     "codigo": "codigo_item",
     "cod_item": "codigo_item",
@@ -39,18 +43,82 @@ _ALIAS_COLUNAS = {
     "local": "local_estoque",
     "setor": "local_estoque",
     "data_consumo": "data",
+    "dt_mes": "data",
+    "ds_centro_custo": "local_estoque",
+    "cd_material": "codigo_item",
+    "ds_material": "descricao_item",
+    "ds_grupo_material": "grupo_item",
+    "ds_subgrupo_material": "subgrupo_item",
+    "ds_classe_material": "classe_item",
+    "cd_unid": "unidade_medida",
+    "qt_consumo": "quantidade",
+    "vl_consumo": "valor",
 }
+
+
+def _ler_csv(conteudo: bytes) -> pd.DataFrame:
+    """Lê CSV detectando separador (';' ou ',') e codificação (utf-8/latin-1)"""
+    ultima_excecao: Exception | None = None
+    fallback: pd.DataFrame | None = None
+    for encoding in ("utf-8-sig", "latin-1"):
+        for sep in (";", ","):
+            try:
+                df = pd.read_csv(BytesIO(conteudo), sep=sep, encoding=encoding)
+            except Exception as exc:
+                ultima_excecao = exc
+                continue
+            if df.shape[1] > 1:
+                return df
+            if fallback is None:
+                fallback = df
+    if fallback is not None:
+        return fallback
+    raise ultima_excecao or ValueError("Não foi possível ler o CSV.")
 
 
 def _ler_arquivo(conteudo: bytes, nome_arquivo: str) -> pd.DataFrame:
     extensao = nome_arquivo.lower().rsplit(".", 1)[-1]
     if extensao == "csv":
-        try:
-            return pd.read_csv(BytesIO(conteudo), sep=";", encoding="utf-8")
-        except Exception:
-            return pd.read_csv(BytesIO(conteudo), sep=",", encoding="latin-1")
+        return _ler_csv(conteudo)
     elif extensao in ("xls", "xlsx"):
         return pd.read_excel(BytesIO(conteudo))
+    else:
+        raise ValueError(f"Formato não suportado: .{extensao}. Use CSV ou Excel.")
+
+
+def _detectar_dialeto_csv(conteudo: bytes) -> tuple[str, str]:
+    """(separador, encoding) inferidos a partir do início do arquivo, para ler
+    o restante em lotes com os mesmos parâmetros."""
+    amostra = conteudo[:65536]
+    for encoding in ("utf-8-sig", "latin-1"):
+        for sep in (";", ","):
+            try:
+                cabecalho = pd.read_csv(
+                    BytesIO(amostra), sep=sep, encoding=encoding, nrows=5
+                )
+            except Exception:
+                continue
+            if cabecalho.shape[1] > 1:
+                return sep, encoding
+    return ";", "utf-8-sig"
+
+
+def _blocos_dataframe(conteudo: bytes, nome_arquivo: str, tamanho: int):
+    """Gera o arquivo em blocos de ``tamanho`` linhas (streaming), evitando
+    carregar todo o conteúdo tabulado de uma vez."""
+    extensao = nome_arquivo.lower().rsplit(".", 1)[-1]
+    if extensao == "csv":
+        sep, encoding = _detectar_dialeto_csv(conteudo)
+        leitor = pd.read_csv(
+            BytesIO(conteudo), sep=sep, encoding=encoding, chunksize=tamanho
+        )
+        for bloco in leitor:
+            yield bloco
+    elif extensao in ("xls", "xlsx"):
+        # Excel não suporta leitura em chunks; fatiamos o DataFrame já carregado.
+        df = pd.read_excel(BytesIO(conteudo))
+        for inicio in range(0, len(df), tamanho):
+            yield df.iloc[inicio:inicio + tamanho].copy()
     else:
         raise ValueError(f"Formato não suportado: .{extensao}. Use CSV ou Excel.")
 
@@ -74,7 +142,14 @@ def _parsear_data(valor: str | date) -> date | None:
     if isinstance(valor, (date, datetime)):
         return valor if isinstance(valor, date) else valor.date()
     valor = str(valor).strip()
-    for fmt in ("%d/%m/%Y", "%Y-%m-%d", "%d-%m-%Y", "%Y/%m/%d"):
+    formatos = (
+        # Datas completas
+        "%d/%m/%Y", "%Y-%m-%d", "%d-%m-%Y", "%Y/%m/%d",
+        "%Y-%m-%d %H:%M:%S", "%d/%m/%Y %H:%M:%S",
+        # Competências mensais (DT_MES) -> normalizadas para o 1º dia do mês
+        "%Y-%m", "%m/%Y", "%Y/%m", "%m-%Y", "%Y%m",
+    )
+    for fmt in formatos:
         try:
             return datetime.strptime(valor, fmt).date()
         except ValueError:
@@ -166,45 +241,93 @@ def _salvar_consumos_brutos(
         db.add(consumo)
 
 
-def _agregar_consumos_tratados(db: Session, empresa_id: int) -> None:
-    """Agrega consumos brutos por item + mês e faz upsert em consumos_tratados."""
-    consumos = (
-        db.query(Consumo)
-        .filter(Consumo.empresa_id == empresa_id)
-        .all()
-    )
-    if not consumos:
-        return
+def _resolver_item_id(
+    db: Session, empresa_id: int, codigo, descricao, cache: dict[str, int]
+) -> int:
+    """id do item, usando um cache em memória para evitar um SELECT por linha.
+    Cria o item na primeira vez que o código aparece."""
+    codigo = str(codigo).strip()
+    if codigo in cache:
+        return cache[codigo]
+    item = db.query(Item).filter(
+        Item.empresa_id == empresa_id, Item.codigo_item == codigo
+    ).first()
+    if item is None:
+        item = Item(
+            empresa_id=empresa_id,
+            codigo_item=codigo,
+            descricao_item=str(descricao).strip(),
+        )
+        db.add(item)
+        db.flush()
+    cache[codigo] = item.id
+    return item.id
 
+
+def _salvar_bloco(
+    db: Session, df: pd.DataFrame, empresa_id: int, importacao_id: int,
+    cache: dict[str, int],
+) -> None:
+    """Insere um lote de consumos em bulk, resolvendo item_id via cache."""
+    registros = []
+    for _, row in df.iterrows():
+        item_id = _resolver_item_id(
+            db, empresa_id, row["codigo_item"], row["descricao_item"], cache
+        )
+        registros.append({
+            "empresa_id": empresa_id,
+            "importacao_id": importacao_id,
+            "item_id": item_id,
+            "data": row["data"],
+            "quantidade": float(row["quantidade"]),
+            "valor": float(row["valor"]),
+            "local_estoque": str(row.get("local_estoque", "")).strip() or None,
+        })
+    if registros:
+        db.bulk_insert_mappings(Consumo, registros)
+
+
+def _agregar_consumos_tratados(db: Session, empresa_id: int) -> None:
+    """Agrega consumos brutos por item + mês (+ local) e recria consumos_tratados.
+
+    Percorre os consumos em streaming (``yield_per``) acumulando apenas os grupos
+    (item, mês, local) — o uso de memória fica proporcional ao número de grupos,
+    não ao total de linhas.
+    """
+    agregados: dict[tuple, dict] = {}
+    consulta = (
+        db.query(
+            Consumo.item_id, Consumo.data, Consumo.quantidade,
+            Consumo.valor, Consumo.local_estoque,
+        )
+        .filter(Consumo.empresa_id == empresa_id)
+        .yield_per(10_000)
+    )
+    for item_id, data, quantidade, valor, local in consulta:
+        chave = (item_id, data.replace(day=1), local)
+        acc = agregados.get(chave)
+        if acc is None:
+            agregados[chave] = {"quantidade": float(quantidade), "valor": float(valor)}
+        else:
+            acc["quantidade"] += float(quantidade)
+            acc["valor"] += float(valor)
+
+    # Remove tratados antigos e recria (recálculo completo).
+    db.query(ConsumoTratado).filter(ConsumoTratado.empresa_id == empresa_id).delete()
+    if not agregados:
+        return
     registros = [
         {
-            "item_id": c.item_id,
-            "periodo": c.data.replace(day=1),
-            "quantidade": c.quantidade,
-            "valor": c.valor,
-            "local_estoque": c.local_estoque,
+            "empresa_id": empresa_id,
+            "item_id": item_id,
+            "periodo": periodo,
+            "quantidade_total": valores["quantidade"],
+            "valor_total": valores["valor"],
+            "local_estoque": local,
         }
-        for c in consumos
+        for (item_id, periodo, local), valores in agregados.items()
     ]
-    df = pd.DataFrame(registros)
-    agregado = (
-        df.groupby(["item_id", "periodo", "local_estoque"], dropna=False)
-        .agg(quantidade_total=("quantidade", "sum"), valor_total=("valor", "sum"))
-        .reset_index()
-    )
-
-    # Remove tratados antigos e recria (estratégia simples para recalculo completo)
-    db.query(ConsumoTratado).filter(ConsumoTratado.empresa_id == empresa_id).delete()
-    for _, row in agregado.iterrows():
-        tratado = ConsumoTratado(
-            empresa_id=empresa_id,
-            item_id=int(row["item_id"]),
-            periodo=row["periodo"],
-            quantidade_total=float(row["quantidade_total"]),
-            valor_total=float(row["valor_total"]),
-            local_estoque=row["local_estoque"] if pd.notna(row["local_estoque"]) else None,
-        )
-        db.add(tratado)
+    db.bulk_insert_mappings(ConsumoTratado, registros)
 
 
 def criar_importacao_processando(
@@ -230,30 +353,58 @@ def criar_importacao_processando(
 def executar_pipeline(
     db: Session, importacao: Importacao, conteudo: bytes, nome_arquivo: str, empresa_id: int
 ) -> Importacao:
-    """Processa o arquivo dentro de uma importação já criada e atualiza seu status."""
+    """Processa o arquivo dentro de uma importação já criada e atualiza seu status.
+
+    A leitura, limpeza e gravação são feitas em lotes de ``TAMANHO_LOTE`` linhas,
+    com commit por lote, para manter o uso de memória constante e permitir
+    acompanhar o progresso em arquivos grandes (o `registros_validos` sobe a cada
+    lote). A agregação de `consumos_tratados` roda uma vez ao final.
+    """
+    importacao_id = importacao.id
     try:
-        logger.info("Iniciando pipeline de importação id=%s empresa=%s", importacao.id, empresa_id)
+        logger.info("Iniciando pipeline de importação id=%s empresa=%s", importacao_id, empresa_id)
 
-        df_raw = _ler_arquivo(conteudo, nome_arquivo)
-        df_raw = _normalizar_colunas(df_raw)
-        _validar_colunas(df_raw)
+        cache_itens: dict[str, int] = {}
+        total = validos = invalidos = 0
+        erros: list[str] = []
+        colunas_validadas = False
 
-        df_valido, erros = _limpar_dados(df_raw)
+        for bloco in _blocos_dataframe(conteudo, nome_arquivo, TAMANHO_LOTE):
+            bloco = _normalizar_colunas(bloco)
+            if not colunas_validadas:
+                _validar_colunas(bloco)  # cabeçalho basta ser checado uma vez
+                colunas_validadas = True
 
-        importacao.total_registros = len(df_raw)
-        importacao.registros_validos = len(df_valido)
-        importacao.registros_invalidos = len(df_raw) - len(df_valido)
-        importacao.erros = erros or None
+            df_valido, erros_bloco = _limpar_dados(bloco)
+            total += len(bloco)
+            validos += len(df_valido)
+            invalidos += len(bloco) - len(df_valido)
+            if len(erros) < MAX_ERROS_REPORTADOS and erros_bloco:
+                erros.extend(erros_bloco[: MAX_ERROS_REPORTADOS - len(erros)])
 
-        if not df_valido.empty:
-            _salvar_consumos_brutos(db, df_valido, empresa_id, importacao.id)
+            if not df_valido.empty:
+                _salvar_bloco(db, df_valido, empresa_id, importacao_id, cache_itens)
+
+            # Progresso incremental persistido (visível via GET /importacoes/{id}).
+            importacao.total_registros = total
+            importacao.registros_validos = validos
+            importacao.registros_invalidos = invalidos
+            db.commit()
+
+        if validos:
             _agregar_consumos_tratados(db, empresa_id)
 
+        if len(erros) >= MAX_ERROS_REPORTADOS:
+            erros.append(
+                f"... lista truncada em {MAX_ERROS_REPORTADOS} mensagens "
+                f"(total de linhas inválidas: {invalidos})."
+            )
+        importacao.erros = erros or None
         importacao.status = "concluido"
         importacao.concluido_em = datetime.now(timezone.utc)
         logger.info(
             "Pipeline concluído id=%s válidos=%s inválidos=%s",
-            importacao.id, importacao.registros_validos, importacao.registros_invalidos,
+            importacao_id, validos, invalidos,
         )
 
     except Exception as exc:
