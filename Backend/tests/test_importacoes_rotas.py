@@ -97,3 +97,27 @@ def test_detalhe_importacao_existente(client, db_session, token_admin, empresa, 
 def test_detalhe_importacao_inexistente_404(client, token_admin):
     resposta = client.get("/importacoes/99999", headers=_auth(token_admin))
     assert resposta.status_code == 404
+
+
+def test_upload_modo_invalido_da_400(client, token_admin, csv_valido):
+    resposta = client.post(
+        "/importacoes/upload",
+        headers=_auth(token_admin),
+        data={"modo": "tudo"},
+        files={"arquivo": ("consumo.csv", csv_valido, "text/csv")},
+    )
+    assert resposta.status_code == 400
+
+
+def test_upload_registra_modo_completa(client, token_admin, csv_valido, monkeypatch):
+    from app.routers import importacoes_routers
+
+    monkeypatch.setattr(importacoes_routers, "_processar_importacao_background", lambda *a: None)
+    resposta = client.post(
+        "/importacoes/upload",
+        headers=_auth(token_admin),
+        data={"modo": "completa"},
+        files={"arquivo": ("consumo.csv", csv_valido, "text/csv")},
+    )
+    assert resposta.status_code == 202
+    assert resposta.json()["modo"] == "completa"

@@ -4,7 +4,14 @@ from sqlalchemy.orm import Session
 from app.database import get_db
 from app.dependencies import get_current_user, require_admin
 from app.models.usuario import Usuario
-from app.schemas.usuario_schemas import UsuarioCreate, UsuarioUpdate, UsuarioResponse
+from app.schemas.auth_schemas import MensagemResponse
+from app.schemas.usuario_schemas import (
+    MeuPerfilUpdate,
+    TrocarSenhaRequest,
+    UsuarioCreate,
+    UsuarioResponse,
+    UsuarioUpdate,
+)
 from app.services import usuario_service
 
 router = APIRouter(prefix="/usuarios", tags=["Usuários"])
@@ -12,6 +19,26 @@ router = APIRouter(prefix="/usuarios", tags=["Usuários"])
 @router.get("/me", response_model=UsuarioResponse)
 def me(current_user: Usuario = Depends(get_current_user)):
     return current_user
+
+
+@router.patch("/me", response_model=UsuarioResponse)
+def atualizar_me(
+    dados: MeuPerfilUpdate,
+    db: Session = Depends(get_db),
+    current_user: Usuario = Depends(get_current_user),
+):
+    """O usuário logado altera o próprio nome e/ou e-mail (e-mail exige a senha atual)."""
+    return usuario_service.atualizar_meu_perfil(db, current_user, dados)
+
+
+@router.post("/me/senha", response_model=MensagemResponse)
+def trocar_minha_senha(
+    dados: TrocarSenhaRequest,
+    db: Session = Depends(get_db),
+    current_user: Usuario = Depends(get_current_user),
+):
+    usuario_service.trocar_senha(db, current_user, dados)
+    return MensagemResponse(mensagem="Senha alterada com sucesso.")
 
 @router.get("/listar/usuarios", response_model=list[UsuarioResponse])
 def listar(

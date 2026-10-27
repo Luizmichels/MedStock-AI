@@ -11,7 +11,7 @@ class ConsumoResponse(BaseModel):
     data: date
     quantidade: float
     valor: float
-    local_estoque: str | None = None
+    setor: str | None = None
 
     model_config = {"from_attributes": True}
 

@@ -1,7 +1,7 @@
 import logging
 from datetime import date, datetime, timezone
 from io import BytesIO
-from typing import BinaryIO, Tuple
+from typing import BinaryIO, Iterable, Tuple
 
 import pandas as pd
 from sqlalchemy.orm import Session
@@ -19,8 +19,11 @@ COLUNAS_OBRIGATORIAS = {
     "data",
     "quantidade",
     "valor",
-    "local_estoque",
+    "setor",
 }
+
+# Colunas opcionais que complementam o cadastro do material (gravadas no item).
+ATRIBUTOS_ITEM = ("unidade_medida", "grupo_material", "subgrupo_material", "classe_material")
 
 # Nº de linhas processadas e gravadas por lote.
 TAMANHO_LOTE = 15_000
@@ -40,16 +43,21 @@ _ALIAS_COLUNAS = {
     "valor_consumo": "valor",
     "preco": "valor",
     "preco_total": "valor",
-    "local": "local_estoque",
-    "setor": "local_estoque",
+    # Setor = centro de custo ("local de estoque" segue aceito por compatibilidade).
+    "local": "setor",
+    "local_estoque": "setor",
+    "centro_custo": "setor",
+    "ds_centro_custo": "setor",
     "data_consumo": "data",
     "dt_mes": "data",
-    "ds_centro_custo": "local_estoque",
     "cd_material": "codigo_item",
     "ds_material": "descricao_item",
-    "ds_grupo_material": "grupo_item",
-    "ds_subgrupo_material": "subgrupo_item",
-    "ds_classe_material": "classe_item",
+    "grupo": "grupo_material",
+    "subgrupo": "subgrupo_material",
+    "ds_grupo_material": "grupo_material",
+    "ds_subgrupo_material": "subgrupo_material",
+    "ds_classe_material": "classe_material",
+    "unidade": "unidade_medida",
     "cd_unid": "unidade_medida",
     "qt_consumo": "quantidade",
     "vl_consumo": "valor",
@@ -134,7 +142,7 @@ def _validar_colunas(df: pd.DataFrame) -> None:
     if faltando:
         raise ValueError(
             f"Colunas obrigatórias ausentes: {', '.join(sorted(faltando))}. "
-            "O arquivo deve conter: codigo_item, descricao_item, data, quantidade, local_estoque."
+            "O arquivo deve conter: codigo_item, descricao_item, data, quantidade, valor, setor."
         )
 
 
@@ -236,19 +244,49 @@ def _salvar_consumos_brutos(
             data=row["data"],
             quantidade=float(row["quantidade"]),
             valor=float(row["valor"]),
-            local_estoque=str(row.get("local_estoque", "")).strip() or None,
+            setor=_texto(row.get("setor")),
         )
         db.add(consumo)
 
 
+def _texto(valor) -> str | None:
+    """Texto limpo da célula; vazio/NaN viram None."""
+    if valor is None:
+        return None
+    try:
+        if pd.isna(valor):
+            return None
+    except (TypeError, ValueError):
+        pass
+    texto = str(valor).strip()
+    return texto or None
+
+
+def _atributos_item(row) -> dict[str, str]:
+    """Atributos opcionais do material presentes na linha (só os preenchidos)."""
+    atributos = {}
+    for coluna in ATRIBUTOS_ITEM:
+        valor = _texto(row.get(coluna))
+        if valor is not None:
+            atributos[coluna] = valor
+    return atributos
+
+
 def _resolver_item_id(
-    db: Session, empresa_id: int, codigo, descricao, cache: dict[str, int]
+    db: Session,
+    empresa_id: int,
+    codigo,
+    descricao,
+    cache: dict[str, int],
+    atributos: dict[str, str] | None = None,
 ) -> int:
     """id do item, usando um cache em memória para evitar um SELECT por linha.
-    Cria o item na primeira vez que o código aparece."""
+    Na primeira vez que o código aparece na importação, cria o item ou atualiza
+    os atributos do material (grupo, subgrupo, classe, unidade) que vierem preenchidos."""
     codigo = str(codigo).strip()
     if codigo in cache:
         return cache[codigo]
+    atributos = atributos or {}
     item = db.query(Item).filter(
         Item.empresa_id == empresa_id, Item.codigo_item == codigo
     ).first()
@@ -257,9 +295,13 @@ def _resolver_item_id(
             empresa_id=empresa_id,
             codigo_item=codigo,
             descricao_item=str(descricao).strip(),
+            **atributos,
         )
         db.add(item)
         db.flush()
+    else:
+        for coluna, valor in atributos.items():
+            setattr(item, coluna, valor)
     cache[codigo] = item.id
     return item.id
 
@@ -272,7 +314,8 @@ def _salvar_bloco(
     registros = []
     for _, row in df.iterrows():
         item_id = _resolver_item_id(
-            db, empresa_id, row["codigo_item"], row["descricao_item"], cache
+            db, empresa_id, row["codigo_item"], row["descricao_item"], cache,
+            atributos=_atributos_item(row),
         )
         registros.append({
             "empresa_id": empresa_id,
@@ -281,30 +324,30 @@ def _salvar_bloco(
             "data": row["data"],
             "quantidade": float(row["quantidade"]),
             "valor": float(row["valor"]),
-            "local_estoque": str(row.get("local_estoque", "")).strip() or None,
+            "setor": _texto(row.get("setor")),
         })
     if registros:
         db.bulk_insert_mappings(Consumo, registros)
 
 
 def _agregar_consumos_tratados(db: Session, empresa_id: int) -> None:
-    """Agrega consumos brutos por item + mês (+ local) e recria consumos_tratados.
+    """Agrega consumos brutos por item + mês (+ setor) e recria consumos_tratados.
 
     Percorre os consumos em streaming (``yield_per``) acumulando apenas os grupos
-    (item, mês, local) — o uso de memória fica proporcional ao número de grupos,
+    (item, mês, setor) — o uso de memória fica proporcional ao número de grupos,
     não ao total de linhas.
     """
     agregados: dict[tuple, dict] = {}
     consulta = (
         db.query(
             Consumo.item_id, Consumo.data, Consumo.quantidade,
-            Consumo.valor, Consumo.local_estoque,
+            Consumo.valor, Consumo.setor,
         )
         .filter(Consumo.empresa_id == empresa_id)
         .yield_per(10_000)
     )
-    for item_id, data, quantidade, valor, local in consulta:
-        chave = (item_id, data.replace(day=1), local)
+    for item_id, data, quantidade, valor, setor in consulta:
+        chave = (item_id, data.replace(day=1), setor)
         acc = agregados.get(chave)
         if acc is None:
             agregados[chave] = {"quantidade": float(quantidade), "valor": float(valor)}
@@ -323,19 +366,31 @@ def _agregar_consumos_tratados(db: Session, empresa_id: int) -> None:
             "periodo": periodo,
             "quantidade_total": valores["quantidade"],
             "valor_total": valores["valor"],
-            "local_estoque": local,
+            "setor": setor,
         }
-        for (item_id, periodo, local), valores in agregados.items()
+        for (item_id, periodo, setor), valores in agregados.items()
     ]
     db.bulk_insert_mappings(ConsumoTratado, registros)
 
 
+MODOS_IMPORTACAO = ("incremental", "completa")
+
+
 def criar_importacao_processando(
-    db: Session, nome_arquivo: str, empresa_id: int, usuario_id: int
+    db: Session,
+    nome_arquivo: str,
+    empresa_id: int,
+    usuario_id: int,
+    modo: str = "incremental",
+    tipo: str | None = None,
 ) -> Importacao:
-    """Cria o registro de importação com status 'processando' (persistido)."""
-    extensao = nome_arquivo.lower().rsplit(".", 1)[-1]
-    tipo = "excel" if extensao in ("xls", "xlsx") else "csv"
+    """Cria o registro de importação com status 'processando' (persistido).
+    ``tipo`` padrão vem da extensão do arquivo ('csv' | 'excel'); a API usa 'api'."""
+    if modo not in MODOS_IMPORTACAO:
+        raise ValueError(f"Modo de importação inválido: {modo}")
+    if tipo is None:
+        extensao = nome_arquivo.lower().rsplit(".", 1)[-1]
+        tipo = "excel" if extensao in ("xls", "xlsx") else "csv"
 
     importacao = Importacao(
         empresa_id=empresa_id,
@@ -343,6 +398,7 @@ def criar_importacao_processando(
         nome_arquivo=nome_arquivo,
         tipo=tipo,
         status="processando",
+        modo=modo,
     )
     db.add(importacao)
     db.commit()
@@ -350,8 +406,25 @@ def criar_importacao_processando(
     return importacao
 
 
+def dataframe_de_registros(registros: list[dict]) -> pd.DataFrame:
+    """Registros vindos da API viram um bloco no mesmo formato do arquivo.
+
+    O índice começa em -1 para que as mensagens de erro ("linha N", que somam 2
+    ao índice por causa do cabeçalho do CSV) apontem a posição do registro no
+    envio, contando a partir de 1."""
+    df = pd.DataFrame(registros)
+    df.index = range(-1, len(df) - 1)
+    return df
+
+
 def executar_pipeline(
-    db: Session, importacao: Importacao, conteudo: bytes, nome_arquivo: str, empresa_id: int
+    db: Session,
+    importacao: Importacao,
+    conteudo: bytes,
+    nome_arquivo: str,
+    empresa_id: int,
+    *,
+    blocos: Iterable[pd.DataFrame] | None = None,
 ) -> Importacao:
     """Processa o arquivo dentro de uma importação já criada e atualiza seu status.
 
@@ -359,8 +432,14 @@ def executar_pipeline(
     com commit por lote, para manter o uso de memória constante e permitir
     acompanhar o progresso em arquivos grandes (o `registros_validos` sobe a cada
     lote). A agregação de `consumos_tratados` roda uma vez ao final.
+
+    Modo ``completa``: só depois de o arquivo inteiro ser gravado com sucesso, os
+    consumos de importações anteriores do hospital são apagados (a base passa a
+    ser exatamente este arquivo). Se algo falhar, as linhas parciais desta
+    importação são removidas e a base anterior fica intacta, em qualquer modo.
     """
     importacao_id = importacao.id
+    modo = importacao.modo or "incremental"
     try:
         logger.info("Iniciando pipeline de importação id=%s empresa=%s", importacao_id, empresa_id)
 
@@ -369,7 +448,9 @@ def executar_pipeline(
         erros: list[str] = []
         colunas_validadas = False
 
-        for bloco in _blocos_dataframe(conteudo, nome_arquivo, TAMANHO_LOTE):
+        if blocos is None:
+            blocos = _blocos_dataframe(conteudo, nome_arquivo, TAMANHO_LOTE)
+        for bloco in blocos:
             bloco = _normalizar_colunas(bloco)
             if not colunas_validadas:
                 _validar_colunas(bloco)  # cabeçalho basta ser checado uma vez
@@ -391,6 +472,14 @@ def executar_pipeline(
             importacao.registros_invalidos = invalidos
             db.commit()
 
+        if validos and modo == "completa":
+            removidos = (
+                db.query(Consumo)
+                .filter(Consumo.empresa_id == empresa_id, Consumo.importacao_id != importacao_id)
+                .delete(synchronize_session=False)
+            )
+            logger.info("Importação completa id=%s: %s consumos anteriores removidos", importacao_id, removidos)
+
         if validos:
             _agregar_consumos_tratados(db, empresa_id)
 
@@ -408,6 +497,12 @@ def executar_pipeline(
         )
 
     except Exception as exc:
+        # Desfaz o que estava pendente e remove as linhas já gravadas por esta
+        # importação (lotes anteriores já commitados), para não deixar a base pela metade.
+        db.rollback()
+        db.query(Consumo).filter(Consumo.importacao_id == importacao_id).delete(
+            synchronize_session=False
+        )
         importacao.status = "erro"
         importacao.erros = [str(exc)]
         importacao.concluido_em = datetime.now(timezone.utc)
@@ -425,6 +520,7 @@ def executar_pipeline(
             empresa_id=empresa_id,
             contexto={
                 "arquivo": nome_arquivo,
+                "modo": modo,
                 "validos": importacao.registros_validos,
                 "invalidos": importacao.registros_invalidos,
             },
@@ -446,7 +542,8 @@ def processar_arquivo(
     nome_arquivo: str,
     empresa_id: int,
     usuario_id: int,
+    modo: str = "incremental",
 ) -> Importacao:
     """Ponto de entrada síncrono do pipeline: cria a importação e a processa."""
-    importacao = criar_importacao_processando(db, nome_arquivo, empresa_id, usuario_id)
+    importacao = criar_importacao_processando(db, nome_arquivo, empresa_id, usuario_id, modo)
     return executar_pipeline(db, importacao, conteudo, nome_arquivo, empresa_id)

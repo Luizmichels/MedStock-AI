@@ -12,6 +12,9 @@ class Importacao(Base):
     nome_arquivo: Mapped[str] = mapped_column(String(500))
     tipo: Mapped[str] = mapped_column(String(10))  # 'csv' | 'excel' | 'api'
     status: Mapped[str] = mapped_column(String(20))  # 'processando' | 'concluido' | 'erro'
+    # 'incremental': só acrescenta linhas. 'completa': ao concluir, substitui toda
+    # a base de consumo do hospital pelo conteúdo deste arquivo.
+    modo: Mapped[str] = mapped_column(String(20), default="incremental", server_default="incremental")
     total_registros: Mapped[int] = mapped_column(Integer, default=0)
     registros_validos: Mapped[int] = mapped_column(Integer, default=0)
     registros_invalidos: Mapped[int] = mapped_column(Integer, default=0)

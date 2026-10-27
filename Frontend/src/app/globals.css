@@ -1,0 +1,32 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  color-scheme: light;
+}
+
+html,
+body {
+  height: 100%;
+}
+
+body {
+  @apply bg-navy font-sans text-ink antialiased;
+}
+
+/* Status pills e utilidades reutilizadas pelas telas. */
+@layer components {
+  .previa-input {
+    @apply h-11 w-full rounded-lg border border-[#CBD6E2] px-3.5 text-sm text-ink outline-none transition
+      focus:border-brand focus:ring-4 focus:ring-brand/20;
+  }
+  .previa-btn {
+    @apply inline-flex h-[42px] items-center justify-center rounded-full bg-brand px-7 text-sm font-extrabold
+      tracking-wide text-white shadow-[0_6px_14px_rgba(74,168,224,.4)] transition hover:bg-brand-600
+      disabled:cursor-not-allowed disabled:opacity-60;
+  }
+  .previa-card {
+    @apply rounded-2xl border border-line bg-white;
+  }
+}

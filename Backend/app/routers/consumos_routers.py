@@ -18,7 +18,7 @@ def listar(
     item_id: int | None = Query(None),
     data_inicio: date | None = Query(None),
     data_fim: date | None = Query(None),
-    local: str | None = Query(None),
+    setor: str | None = Query(None),
     pagina: int = Query(1, ge=1),
     tamanho: int = Query(50, ge=1, le=200),
     db: Session = Depends(get_db),
@@ -30,7 +30,7 @@ def listar(
         item_id=item_id,
         data_inicio=data_inicio,
         data_fim=data_fim,
-        local=local,
+        setor=setor,
         pagina=pagina,
         tamanho=tamanho,
     )

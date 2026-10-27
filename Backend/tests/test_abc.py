@@ -23,7 +23,7 @@ def _tratado(db, empresa, item, *, valor: float, quantidade: float = 1.0) -> Non
             periodo=date(2024, 1, 1),
             quantidade_total=quantidade,
             valor_total=valor,
-            local_estoque=None,
+            setor=None,
         )
     )
 
@@ -140,7 +140,7 @@ def test_classe_xyz_erratico_e_z():
 def _tratado_periodo(db, empresa, item, periodo, quantidade):
     db.add(ConsumoTratado(
         empresa_id=empresa.id, item_id=item.id, periodo=periodo,
-        quantidade_total=quantidade, valor_total=quantidade, local_estoque=None,
+        quantidade_total=quantidade, valor_total=quantidade, setor=None,
     ))
 
 

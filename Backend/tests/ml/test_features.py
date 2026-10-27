@@ -78,7 +78,7 @@ def test_categoricas_recebem_classe_abc():
 
 def test_categoricas_com_local_nulo():
     df = ft.adicionar_categoricas(_serie(), "B", None)
-    assert (df["local_estoque"] == "DESCONHECIDO").all()
+    assert (df["setor"] == "DESCONHECIDO").all()
 
 
 def test_construir_matriz_nao_deixa_nan_nas_features_finais():

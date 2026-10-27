@@ -16,7 +16,8 @@ class Consumo(Base):
     data: Mapped[Date] = mapped_column(Date)
     quantidade: Mapped[float] = mapped_column(Float)
     valor: Mapped[float] = mapped_column(Float)
-    local_estoque: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    # Setor = centro de custo de origem do consumo (antes chamado "local de estoque").
+    setor: Mapped[str | None] = mapped_column(String(255), nullable=True)
     criado_em: Mapped[DateTime] = mapped_column(DateTime, server_default=func.now())
 
     importacao = relationship("Importacao", back_populates="consumos")

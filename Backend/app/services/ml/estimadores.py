@@ -1,4 +1,4 @@
-"""Fábrica dos 5 estimadores de previsão (RFC 5.6).
+"""5 estimadores de previsão.
 
 Todos expõem a mesma interface mínima — ``fit(serie)`` e ``prever(horizonte)`` —
 para que a validação walk-forward e o treinamento tratem qualquer algoritmo de

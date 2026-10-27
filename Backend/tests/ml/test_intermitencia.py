@@ -76,7 +76,7 @@ def test_analisar_empresa_demanda_densa_e_suave(db_session, empresa, usuario_adm
         db_session.add(Consumo(
             empresa_id=empresa.id, importacao_id=imp.id, item_id=item.id,
             data=date(2024, 1, 1) + timedelta(days=i),
-            quantidade=10, valor=100, local_estoque="Central",
+            quantidade=10, valor=100, setor="Central",
         ))
     db_session.commit()
 

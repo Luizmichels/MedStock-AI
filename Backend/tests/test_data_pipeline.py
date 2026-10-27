@@ -71,7 +71,7 @@ def test_normalizar_colunas_aplica_aliases():
     assert "codigo_item" in resultado.columns
     assert "quantidade" in resultado.columns
     assert "valor" in resultado.columns
-    assert "local_estoque" in resultado.columns
+    assert "setor" in resultado.columns
 
 
 def test_normalizar_colunas_remove_espacos_e_maiusculas():
@@ -129,7 +129,7 @@ def test_limpar_dados_remove_duplicatas():
         "data": "01/01/2024",
         "quantidade": "10",
         "valor": "5",
-        "local_estoque": "Central",
+        "setor": "Central",
     }
     df = _df_base([linha, dict(linha)])
     df_valido, erros = dp._limpar_dados(df)
@@ -140,7 +140,7 @@ def test_limpar_dados_remove_duplicatas():
 def test_limpar_dados_rejeita_quantidade_negativa():
     df = _df_base([{
         "codigo_item": "MED001", "descricao_item": "Dipirona", "data": "01/01/2024",
-        "quantidade": "-3", "valor": "5", "local_estoque": "Central",
+        "quantidade": "-3", "valor": "5", "setor": "Central",
     }])
     df_valido, erros = dp._limpar_dados(df)
     assert len(df_valido) == 0
@@ -150,7 +150,7 @@ def test_limpar_dados_rejeita_quantidade_negativa():
 def test_limpar_dados_rejeita_valor_zero():
     df = _df_base([{
         "codigo_item": "MED001", "descricao_item": "Dipirona", "data": "01/01/2024",
-        "quantidade": "10", "valor": "0", "local_estoque": "Central",
+        "quantidade": "10", "valor": "0", "setor": "Central",
     }])
     df_valido, erros = dp._limpar_dados(df)
     assert len(df_valido) == 0
@@ -160,7 +160,7 @@ def test_limpar_dados_rejeita_valor_zero():
 def test_limpar_dados_reporta_campo_nulo_com_numero_da_linha():
     df = _df_base([{
         "codigo_item": None, "descricao_item": "Dipirona", "data": "01/01/2024",
-        "quantidade": "10", "valor": "5", "local_estoque": "Central",
+        "quantidade": "10", "valor": "5", "setor": "Central",
     }])
     df_valido, erros = dp._limpar_dados(df)
     assert len(df_valido) == 0
@@ -195,10 +195,10 @@ def _importacao(db, empresa, usuario) -> Importacao:
     return imp
 
 
-def _consumo(db, empresa, item, importacao, *, data_, quantidade, valor, local="Central"):
+def _consumo(db, empresa, item, importacao, *, data_, quantidade, valor, setor="Central"):
     db.add(Consumo(
         empresa_id=empresa.id, importacao_id=importacao.id, item_id=item.id,
-        data=data_, quantidade=quantidade, valor=valor, local_estoque=local,
+        data=data_, quantidade=quantidade, valor=valor, setor=setor,
     ))
 
 
@@ -266,7 +266,7 @@ def test_processar_arquivo_em_lotes_grava_tudo_e_reusa_item(
 ):
     # Força 3 lotes (5 linhas / lote de 2) para exercitar o streaming.
     monkeypatch.setattr(dp, "TAMANHO_LOTE", 2)
-    linhas = ["codigo_item;descricao_item;data;quantidade;valor;local_estoque"]
+    linhas = ["codigo_item;descricao_item;data;quantidade;valor;setor"]
     for i in range(5):
         linhas.append(f"MED001;Dipirona;0{i + 1}/01/2024;{10 + i};{100 + i};Central")
     conteudo = "\n".join(linhas).encode("utf-8")
@@ -286,7 +286,7 @@ def test_processar_arquivo_em_lotes_preserva_numero_de_linha_global(
 ):
     monkeypatch.setattr(dp, "TAMANHO_LOTE", 2)
     linhas = [
-        "codigo_item;descricao_item;data;quantidade;valor;local_estoque",
+        "codigo_item;descricao_item;data;quantidade;valor;setor",
         "MED001;A;01/01/2024;10;100;Central",   # linha 2 (válida)
         "MED002;B;02/01/2024;-5;100;Central",   # linha 3 (quantidade negativa)
         "MED003;C;03/01/2024;10;100;Central",   # linha 4 (válida)
@@ -309,3 +309,153 @@ def test_processar_arquivo_com_erro_marca_status_erro(db_session, empresa, usuar
     )
     assert importacao.status == "erro"
     assert importacao.erros
+
+
+# --------------------------------------------------------------------------- #
+# Setor e atributos complementares do material
+# --------------------------------------------------------------------------- #
+def _consumos_da_empresa(db, empresa):
+    return db.query(Consumo).filter(Consumo.empresa_id == empresa.id).all()
+
+
+def _item_por_codigo(db, empresa, codigo) -> Item:
+    return db.query(Item).filter(Item.empresa_id == empresa.id, Item.codigo_item == codigo).one()
+
+
+def test_importa_atributos_do_material_e_setor_do_layout_de_origem(db_session, empresa, usuario_admin):
+    conteudo = (
+        '"CD_MATERIAL","DS_MATERIAL","DS_GRUPO_MATERIAL","DS_SUBGRUPO_MATERIAL",'
+        '"DS_CLASSE_MATERIAL","CD_UNID","DT_MES","QT_CONSUMO","VL_CONSUMO","DS_CENTRO_CUSTO"\n'
+        '"MED001","Dipirona 500mg","Medicamentos","Analgésicos","Injetáveis","AMP",'
+        '"2024-01","100","250.50","UTI Adulto"\n'
+    ).encode("utf-8")
+    importacao = dp.processar_arquivo(db_session, conteudo, "consumo.csv", empresa.id, usuario_admin.id)
+
+    assert importacao.status == "concluido"
+    assert importacao.registros_validos == 1
+    item = _item_por_codigo(db_session, empresa, "MED001")
+    assert (item.grupo_material, item.subgrupo_material, item.classe_material, item.unidade_medida) == (
+        "Medicamentos", "Analgésicos", "Injetáveis", "AMP",
+    )
+    assert [c.setor for c in _consumos_da_empresa(db_session, empresa)] == ["UTI Adulto"]
+
+
+def test_cabecalho_antigo_local_estoque_continua_aceito(db_session, empresa, usuario_admin):
+    conteudo = (
+        "codigo_item;descricao_item;data;quantidade;valor;local_estoque\n"
+        "MED001;Dipirona;01/01/2024;10;20;Farmácia\n"
+    ).encode("utf-8")
+    importacao = dp.processar_arquivo(db_session, conteudo, "consumo.csv", empresa.id, usuario_admin.id)
+
+    assert importacao.status == "concluido"
+    assert [c.setor for c in _consumos_da_empresa(db_session, empresa)] == ["Farmácia"]
+
+
+def test_reimportacao_atualiza_atributos_do_item_existente(db_session, empresa, usuario_admin):
+    sem_grupo = (
+        "codigo_item;descricao_item;data;quantidade;valor;setor\n"
+        "MED001;Dipirona;01/01/2024;10;20;UTI\n"
+    ).encode("utf-8")
+    com_grupo = (
+        "codigo_item;descricao_item;data;quantidade;valor;setor;grupo_material\n"
+        "MED001;Dipirona;01/02/2024;10;20;UTI;Medicamentos\n"
+    ).encode("utf-8")
+    dp.processar_arquivo(db_session, sem_grupo, "a.csv", empresa.id, usuario_admin.id)
+    assert _item_por_codigo(db_session, empresa, "MED001").grupo_material is None
+
+    dp.processar_arquivo(db_session, com_grupo, "b.csv", empresa.id, usuario_admin.id)
+    assert _item_por_codigo(db_session, empresa, "MED001").grupo_material == "Medicamentos"
+
+
+def test_atributo_vazio_nao_apaga_o_valor_existente(db_session, empresa, usuario_admin):
+    com_grupo = (
+        "codigo_item;descricao_item;data;quantidade;valor;setor;grupo_material\n"
+        "MED001;Dipirona;01/01/2024;10;20;UTI;Medicamentos\n"
+    ).encode("utf-8")
+    grupo_vazio = (
+        "codigo_item;descricao_item;data;quantidade;valor;setor;grupo_material\n"
+        "MED001;Dipirona;01/02/2024;10;20;UTI;\n"
+    ).encode("utf-8")
+    dp.processar_arquivo(db_session, com_grupo, "a.csv", empresa.id, usuario_admin.id)
+    dp.processar_arquivo(db_session, grupo_vazio, "b.csv", empresa.id, usuario_admin.id)
+
+    assert _item_por_codigo(db_session, empresa, "MED001").grupo_material == "Medicamentos"
+
+
+# --------------------------------------------------------------------------- #
+# Modos de importação: incremental x completa
+# --------------------------------------------------------------------------- #
+def _csv(*linhas: str) -> bytes:
+    return "\n".join(["codigo_item;descricao_item;data;quantidade;valor;setor", *linhas]).encode()
+
+
+def _total_consumos(db, empresa) -> int:
+    return db.query(Consumo).filter(Consumo.empresa_id == empresa.id).count()
+
+
+def test_importacao_incremental_acrescenta_sem_apagar(db_session, empresa, usuario_admin, csv_valido):
+    dp.processar_arquivo(db_session, csv_valido, "a.csv", empresa.id, usuario_admin.id)
+    segunda = dp.processar_arquivo(db_session, csv_valido, "b.csv", empresa.id, usuario_admin.id)
+    assert segunda.modo == "incremental"
+    assert _total_consumos(db_session, empresa) == 6
+
+
+def test_importacao_completa_substitui_a_base(db_session, empresa, usuario_admin, csv_valido):
+    dp.processar_arquivo(db_session, csv_valido, "a.csv", empresa.id, usuario_admin.id)
+    nova = dp.processar_arquivo(
+        db_session, _csv("MED009;Luva;05/03/2024;7;14.00;UTI"), "b.csv",
+        empresa.id, usuario_admin.id, modo="completa",
+    )
+    assert nova.status == "concluido" and nova.modo == "completa"
+    consumos = db_session.query(Consumo).filter(Consumo.empresa_id == empresa.id).all()
+    assert [c.importacao_id for c in consumos] == [nova.id]
+    tratados = db_session.query(ConsumoTratado).filter(ConsumoTratado.empresa_id == empresa.id).all()
+    assert [(t.quantidade_total, t.setor) for t in tratados] == [(7.0, "UTI")]
+
+
+def test_importacao_completa_nao_afeta_outras_empresas(
+    db_session, empresa, empresa_secundaria, usuario_admin, csv_valido
+):
+    dp.processar_arquivo(db_session, csv_valido, "a.csv", empresa_secundaria.id, usuario_admin.id)
+    dp.processar_arquivo(db_session, csv_valido, "b.csv", empresa.id, usuario_admin.id, modo="completa")
+    assert _total_consumos(db_session, empresa_secundaria) == 3
+
+
+def test_importacao_completa_com_erro_preserva_a_base(
+    db_session, empresa, usuario_admin, csv_valido, csv_invalido
+):
+    dp.processar_arquivo(db_session, csv_valido, "a.csv", empresa.id, usuario_admin.id)
+    falha = dp.processar_arquivo(
+        db_session, csv_invalido, "b.csv", empresa.id, usuario_admin.id, modo="completa"
+    )
+    assert falha.status == "erro"
+    assert _total_consumos(db_session, empresa) == 3
+
+
+def test_importacao_sem_linhas_validas_nao_apaga_a_base(db_session, empresa, usuario_admin, csv_valido):
+    dp.processar_arquivo(db_session, csv_valido, "a.csv", empresa.id, usuario_admin.id)
+    vazia = dp.processar_arquivo(
+        db_session, _csv("MED001;Dipirona;data-ruim;1;1.00;UTI"), "b.csv",
+        empresa.id, usuario_admin.id, modo="completa",
+    )
+    assert vazia.status == "concluido" and vazia.registros_validos == 0
+    assert _total_consumos(db_session, empresa) == 3
+
+
+def test_erro_no_meio_remove_linhas_parciais_da_importacao(
+    db_session, empresa, usuario_admin, csv_valido, monkeypatch
+):
+    dp.processar_arquivo(db_session, csv_valido, "a.csv", empresa.id, usuario_admin.id)
+
+    def explode(*_args, **_kwargs):
+        raise RuntimeError("falha simulada na agregação")
+
+    monkeypatch.setattr(dp, "_agregar_consumos_tratados", explode)
+    falha = dp.processar_arquivo(db_session, csv_valido, "b.csv", empresa.id, usuario_admin.id)
+    assert falha.status == "erro"
+    assert _total_consumos(db_session, empresa) == 3  # só a primeira importação
+
+
+def test_modo_invalido_levanta_erro(db_session, empresa, usuario_admin, csv_valido):
+    with pytest.raises(ValueError):
+        dp.processar_arquivo(db_session, csv_valido, "a.csv", empresa.id, usuario_admin.id, modo="tudo")

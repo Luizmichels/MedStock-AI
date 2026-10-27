@@ -16,11 +16,7 @@ ALPHA_PADRAO = 0.1
 
 
 def croston(serie, *, alpha: float = ALPHA_PADRAO, variante: str = "sba") -> float:
-    """Taxa de demanda diária prevista (constante) para uma série diária.
-
-    ``variante``: "classico" (Croston) ou "sba" (correção de viés).
-    Séries sem nenhuma demanda retornam 0.0.
-    """
+    """ Taxa de demanda diária prevista (constante) para uma série diária """
     y = np.asarray(serie, dtype=float)
     demandas = np.flatnonzero(y > 0)
     if demandas.size == 0:

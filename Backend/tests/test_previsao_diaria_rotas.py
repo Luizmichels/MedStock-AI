@@ -21,7 +21,7 @@ def _seed_consumo_denso(db, empresa, usuario, item, dias=40):
     for i in range(dias):
         db.add(Consumo(
             empresa_id=empresa.id, importacao_id=imp.id, item_id=item.id,
-            data=inicio + timedelta(days=i), quantidade=10, valor=10, local_estoque="Central",
+            data=inicio + timedelta(days=i), quantidade=10, valor=10, setor="Central",
         ))
     db.commit()
 

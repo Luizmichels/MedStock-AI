@@ -13,6 +13,7 @@ from app.models.previsoes import Previsao
 from app.models.previsao_diaria import PrevisaoDiaria
 from app.models.feriados import Feriado
 from app.models.logs_execucao import LogExecucao
+from app.models.chave_integracao import ChaveIntegracao
 
 __all__ = [
     "Empresa",
@@ -28,4 +29,5 @@ __all__ = [
     "PrevisaoDiaria",
     "Feriado",
     "LogExecucao",
+    "ChaveIntegracao",
 ]

@@ -21,7 +21,7 @@ def _importacao(db, empresa, usuario) -> Importacao:
 def _consumo(db, empresa, imp, item_id, dia, qtd):
     db.add(Consumo(
         empresa_id=empresa.id, importacao_id=imp.id, item_id=item_id,
-        data=dia, quantidade=qtd, valor=qtd, local_estoque="Central",
+        data=dia, quantidade=qtd, valor=qtd, setor="Central",
     ))
 
 
