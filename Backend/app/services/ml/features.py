@@ -56,11 +56,11 @@ def adicionar_flag_feriado(
 
 
 def adicionar_categoricas(
-    df: pd.DataFrame, classe_abc: str | None, local_estoque: str | None
+    df: pd.DataFrame, classe_abc: str | None, setor: str | None
 ) -> pd.DataFrame:
     df = df.copy()
     df["classe_abc"] = classe_abc or "SEM_CLASSE"
-    df["local_estoque"] = local_estoque or "DESCONHECIDO"
+    df["setor"] = setor or "DESCONHECIDO"
     return df
 
 
@@ -68,7 +68,7 @@ def construir_matriz(
     df: pd.DataFrame,
     feriados: list[date],
     classe_abc: str | None,
-    local_estoque: str | None,
+    setor: str | None,
     coluna: str = "quantidade_total",
     coluna_data: str = "periodo",
 ) -> pd.DataFrame:
@@ -79,6 +79,6 @@ def construir_matriz(
     df = adicionar_medias_moveis(df, coluna)
     df = adicionar_indicadores_calendario(df, coluna_data)
     df = adicionar_flag_feriado(df, feriados, coluna_data)
-    df = adicionar_categoricas(df, classe_abc, local_estoque)
+    df = adicionar_categoricas(df, classe_abc, setor)
     df = df.dropna(subset=_COLUNAS_LAG_MM).reset_index(drop=True)
     return df

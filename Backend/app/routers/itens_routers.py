@@ -15,6 +15,9 @@ router = APIRouter(prefix="/itens", tags=["Itens"])
 def listar(
     busca: str | None = Query(None),
     classe_abc: str | None = Query(None),
+    grupo_material: str | None = Query(None),
+    subgrupo_material: str | None = Query(None),
+    classe_material: str | None = Query(None),
     pagina: int = Query(1, ge=1),
     tamanho: int = Query(50, ge=1, le=200),
     db: Session = Depends(get_db),
@@ -25,6 +28,9 @@ def listar(
         current_user.empresa_id,
         busca=busca,
         classe_abc=classe_abc,
+        grupo_material=grupo_material,
+        subgrupo_material=subgrupo_material,
+        classe_material=classe_material,
         pagina=pagina,
         tamanho=tamanho,
     )

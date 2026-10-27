@@ -20,10 +20,10 @@ def _importacao(db, empresa, usuario) -> Importacao:
     return imp
 
 
-def _consumo(db, empresa, item, imp, data_, *, local="Central") -> None:
+def _consumo(db, empresa, item, imp, data_, *, setor="Central") -> None:
     db.add(Consumo(
         empresa_id=empresa.id, importacao_id=imp.id, item_id=item.id,
-        data=data_, quantidade=10, valor=100, local_estoque=local,
+        data=data_, quantidade=10, valor=100, setor=setor,
     ))
 
 

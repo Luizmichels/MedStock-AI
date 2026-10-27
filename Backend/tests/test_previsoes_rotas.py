@@ -42,7 +42,7 @@ def _item_curto(db, empresa, codigo="CURTO") -> Item:
     db.flush()
     db.add(ConsumoTratado(
         empresa_id=empresa.id, item_id=item.id, periodo=date(2024, 1, 1),
-        quantidade_total=10.0, valor_total=100.0, local_estoque=None,
+        quantidade_total=10.0, valor_total=100.0, setor=None,
     ))
     db.commit()
     return item

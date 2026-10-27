@@ -22,7 +22,7 @@ def _item_curto(db, empresa, codigo="CURTO") -> Item:
     for mes in (1, 2):
         db.add(ConsumoTratado(
             empresa_id=empresa.id, item_id=item.id, periodo=date(2024, mes, 1),
-            quantidade_total=10.0, valor_total=100.0, local_estoque=None,
+            quantidade_total=10.0, valor_total=100.0, setor=None,
         ))
     db.commit()
     return item
@@ -32,11 +32,11 @@ def test_carregar_series_preenche_meses_faltantes_com_zero(db_session, empresa, 
     # Consumo em jan e mar, sem fevereiro: o mês faltante deve virar zero.
     db_session.add(ConsumoTratado(
         empresa_id=empresa.id, item_id=item.id, periodo=date(2024, 1, 1),
-        quantidade_total=10.0, valor_total=100.0, local_estoque=None,
+        quantidade_total=10.0, valor_total=100.0, setor=None,
     ))
     db_session.add(ConsumoTratado(
         empresa_id=empresa.id, item_id=item.id, periodo=date(2024, 3, 1),
-        quantidade_total=30.0, valor_total=300.0, local_estoque=None,
+        quantidade_total=30.0, valor_total=300.0, setor=None,
     ))
     db_session.commit()
 
@@ -147,12 +147,12 @@ def test_gerar_previsoes_ancora_todos_na_referencia_comum(db_session, empresa):
     for mes in (1, 2, 3):
         db_session.add(ConsumoTratado(
             empresa_id=empresa.id, item_id=a.id, periodo=date(2024, mes, 1),
-            quantidade_total=10.0, valor_total=100.0, local_estoque=None,
+            quantidade_total=10.0, valor_total=100.0, setor=None,
         ))
     for ano, mes in ((2023, 11), (2023, 12), (2024, 1)):
         db_session.add(ConsumoTratado(
             empresa_id=empresa.id, item_id=b.id, periodo=date(ano, mes, 1),
-            quantidade_total=5.0, valor_total=50.0, local_estoque=None,
+            quantidade_total=5.0, valor_total=50.0, setor=None,
         ))
     db_session.commit()
 
