@@ -16,7 +16,7 @@ def _com_dados(db, empresa) -> Item:
     db.flush()
     db.add(ConsumoTratado(
         empresa_id=empresa.id, item_id=item.id, periodo=date(2024, 1, 1),
-        quantidade_total=10.0, valor_total=100.0, local_estoque="Central",
+        quantidade_total=10.0, valor_total=100.0, setor="Central",
     ))
     db.commit()
     return item
@@ -57,3 +57,52 @@ def test_classificacao_abc_rota(client, db_session, token_admin, empresa):
 def test_dashboard_sem_autenticacao_rejeitado(client):
     resposta = client.get("/dashboard/resumo")
     assert resposta.status_code in (401, 403)
+
+
+def test_consumo_por_setor_rota(client, db_session, token_admin, empresa):
+    _com_dados(db_session, empresa)
+    resposta = client.get("/dashboard/consumo-por-setor", headers=_auth(token_admin))
+    assert resposta.status_code == 200
+    assert resposta.json() == [{"setor": "Central", "quantidade_total": 10.0, "valor_total": 100.0}]
+
+
+def test_filtro_de_setor_inexistente_zera_o_consumo(client, db_session, token_admin, empresa):
+    _com_dados(db_session, empresa)
+    resposta = client.get(
+        "/dashboard/consumo-por-setor?setor=Outro", headers=_auth(token_admin)
+    )
+    assert resposta.json() == []
+
+
+def test_competencia_invertida_400(client, token_admin, empresa):
+    resposta = client.get(
+        "/dashboard/consumo-mensal?data_inicio=2024-05-01&data_fim=2024-01-01",
+        headers=_auth(token_admin),
+    )
+    assert resposta.status_code == 400
+
+
+def test_opcoes_filtro_rota(client, db_session, token_admin, empresa):
+    _com_dados(db_session, empresa)
+    resposta = client.get("/dashboard/opcoes-filtro", headers=_auth(token_admin))
+    assert resposta.status_code == 200
+    corpo = resposta.json()
+    assert corpo["setores"] == ["Central"]
+    assert corpo["periodo_inicio"] == "2024-01-01"
+    assert len(corpo["materiais"]) > 0
+    assert {"id", "codigo_item", "grupo_material"} <= set(corpo["materiais"][0])
+
+
+def test_filtro_com_parametro_repetido(client, db_session, token_admin, empresa):
+    _com_dados(db_session, empresa)
+    sem_filtro = client.get("/dashboard/consumo-por-setor", headers=_auth(token_admin)).json()
+    com_dois = client.get(
+        "/dashboard/consumo-por-setor?setor=Central&setor=Inexistente",
+        headers=_auth(token_admin),
+    )
+    assert com_dois.status_code == 200
+    assert com_dois.json() == sem_filtro
+    nenhum = client.get(
+        "/dashboard/consumo-por-setor?setor=Inexistente", headers=_auth(token_admin)
+    ).json()
+    assert nenhum == []
