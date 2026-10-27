@@ -7,6 +7,7 @@ class ImportacaoResponse(BaseModel):
     nome_arquivo: str
     tipo: str
     status: str
+    modo: str = "incremental"
     total_registros: int
     registros_validos: int
     registros_invalidos: int

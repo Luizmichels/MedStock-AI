@@ -1,5 +1,5 @@
 import logging
-from fastapi import APIRouter, BackgroundTasks, Depends, UploadFile, File, HTTPException
+from fastapi import APIRouter, BackgroundTasks, Depends, File, Form, HTTPException, UploadFile
 from sqlalchemy.orm import Session
 
 from app.core.config import settings
@@ -8,7 +8,11 @@ from app.dependencies import get_current_user, require_admin
 from app.models.importacoes import Importacao
 from app.models.usuario import Usuario
 from app.schemas.importacao_schemas import ImportacaoResponse
-from app.services.data_pipeline_service import criar_importacao_processando, executar_pipeline
+from app.services.data_pipeline_service import (
+    MODOS_IMPORTACAO,
+    criar_importacao_processando,
+    executar_pipeline,
+)
 from app.services.abc_service import recalcular_abc
 
 logger = logging.getLogger(__name__)
@@ -56,16 +60,22 @@ def _validar_tamanho(conteudo: bytes) -> None:
 async def upload(
     tarefas: BackgroundTasks,
     arquivo: UploadFile = File(...),
+    modo: str = Form(
+        "incremental",
+        description="'incremental' acrescenta as linhas; 'completa' substitui toda a base de consumo do hospital",
+    ),
     db: Session = Depends(get_db),
     current_user: Usuario = Depends(require_admin),
 ):
+    if modo not in MODOS_IMPORTACAO:
+        raise HTTPException(status_code=400, detail="Modo inválido. Use 'incremental' ou 'completa'.")
     _validar_extensao(arquivo.filename)
 
     conteudo = await arquivo.read()
     _validar_tamanho(conteudo)
 
     importacao = criar_importacao_processando(
-        db, arquivo.filename, current_user.empresa_id, current_user.id
+        db, arquivo.filename, current_user.empresa_id, current_user.id, modo
     )
     tarefas.add_task(
         _processar_importacao_background,
