@@ -110,6 +110,7 @@ class _EstimadorArvore(Estimador):
         self.model = None
         self.historico: list[float] = []
 
+    #Falha numérica no LightGBM para séries curtas (3 meses gera len(X) == 0; 4 meses quebra o bagging com 1 amostra).
     @staticmethod
     def _montar_xy(valores: np.ndarray, n_lags: int):
         X, y = [], []

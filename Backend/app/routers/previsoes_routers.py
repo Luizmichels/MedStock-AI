@@ -28,7 +28,7 @@ router = APIRouter(prefix="/previsoes", tags=["Previsões"])
 # Estado em memória dos treinos em andamento (processo único — TCC).
 _TREINOS_EM_ANDAMENTO: set[int] = set()
 
-
+#Controle de concorrência em memória volátil (set) falha em ambientes com múltiplos workers Uvicorn.
 def _executar_treino(empresa_id: int) -> None:
     db = SessionLocal()
     try:

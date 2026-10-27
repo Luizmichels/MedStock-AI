@@ -68,6 +68,7 @@ def solicitar_acesso(
 ):
     return empresa_service.criar_solicitacao(db, dados)
 
+#Rota restrita /solicitacoes/pendentes impede consulta do histórico de aprovadas e rejeitadas.
 @router.get("/solicitacoes/pendentes", response_model=list[SolicitacaoResponse])
 def listar_solicitacoes(
     db: Session = Depends(get_db),
