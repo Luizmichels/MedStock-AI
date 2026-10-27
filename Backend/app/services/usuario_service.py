@@ -2,12 +2,24 @@ from sqlalchemy.orm import Session
 from fastapi import HTTPException
 
 from app.models.usuario import Usuario
-from app.core.security import hash_senha
-from app.schemas.usuario_schemas import UsuarioCreate, UsuarioUpdate
+from app.core.security import hash_senha, verificar_senha
+from app.schemas.usuario_schemas import (
+    MeuPerfilUpdate,
+    TrocarSenhaRequest,
+    UsuarioCreate,
+    UsuarioUpdate,
+)
+
+PERFIL_SUPER_ADMIN = "super_admin"
 
 
 def listar_usuarios(db: Session, empresa_id: int) -> list[Usuario]:
-    return db.query(Usuario).filter(Usuario.empresa_id == empresa_id).all()
+    """Usuários da empresa. O super admin é da plataforma e nunca aparece aqui."""
+    return (
+        db.query(Usuario)
+        .filter(Usuario.empresa_id == empresa_id, Usuario.perfil != PERFIL_SUPER_ADMIN)
+        .all()
+    )
 
 
 def buscar_usuario(db: Session, usuario_id: int, empresa_id: int) -> Usuario:
@@ -56,6 +68,41 @@ def atualizar_usuario(
     db.commit()
     db.refresh(usuario)
     return usuario
+
+
+def _email_em_uso(db: Session, email: str, usuario_id: int) -> bool:
+    return (
+        db.query(Usuario).filter(Usuario.email == email, Usuario.id != usuario_id).first()
+        is not None
+    )
+
+
+def atualizar_meu_perfil(db: Session, usuario: Usuario, dados: MeuPerfilUpdate) -> Usuario:
+    """O próprio usuário altera nome e/ou e-mail. O e-mail é o login, então
+    trocá-lo exige confirmar a senha atual."""
+    if dados.nome is not None:
+        nome = dados.nome.strip()
+        if not nome:
+            raise HTTPException(status_code=400, detail="Informe o nome.")
+        usuario.nome = nome
+    if dados.email is not None and dados.email != usuario.email:
+        if not dados.senha_atual or not verificar_senha(dados.senha_atual, usuario.senha_hash):
+            raise HTTPException(status_code=400, detail="Senha atual incorreta.")
+        if _email_em_uso(db, dados.email, usuario.id):
+            raise HTTPException(status_code=400, detail="E-mail já utilizado por outro usuário")
+        usuario.email = dados.email
+    db.commit()
+    db.refresh(usuario)
+    return usuario
+
+
+def trocar_senha(db: Session, usuario: Usuario, dados: TrocarSenhaRequest) -> None:
+    if not verificar_senha(dados.senha_atual, usuario.senha_hash):
+        raise HTTPException(status_code=400, detail="Senha atual incorreta.")
+    if dados.senha_atual == dados.nova_senha:
+        raise HTTPException(status_code=400, detail="A nova senha deve ser diferente da atual.")
+    usuario.senha_hash = hash_senha(dados.nova_senha)
+    db.commit()
 
 
 def desativar_usuario(db: Session, usuario_id: int, empresa_id: int) -> Usuario:

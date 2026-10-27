@@ -1,5 +1,6 @@
 import secrets
 from datetime import datetime
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 from fastapi import HTTPException
 
@@ -14,7 +15,9 @@ from app.services.email_service import enviar_email, montar_email_definicao_senh
 
 
 def listar_empresas(db: Session) -> list[Empresa]:
-    return db.query(Empresa).all()
+    """Hospitais clientes. A empresa interna do super admin (plataforma) fica de fora."""
+    empresas_da_plataforma = select(Usuario.empresa_id).where(Usuario.perfil == "super_admin")
+    return db.query(Empresa).filter(Empresa.id.not_in(empresas_da_plataforma)).all()
 
 
 def buscar_empresa(db: Session, empresa_id: int) -> Empresa:

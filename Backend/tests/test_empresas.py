@@ -148,3 +148,20 @@ def test_rejeitar_solicitacao_nao_cria_empresa(client, db_session, token_super_a
 
     assert resposta.status_code == 200
     assert db_session.query(Empresa).filter(Empresa.nome == "Hospital Novo").first() is None
+
+
+def test_empresa_do_super_admin_nao_aparece_na_lista(client, db_session, empresa, token_super_admin):
+    plataforma = Empresa(
+        nome="Sistema MedStock", email_responsavel="plataforma@medstock.com",
+        nome_responsavel="Super Admin", cnpj="00.000.000/0000-00",
+        endereco="Rua A, 1", cidade="Joinville", uf="SC",
+    )
+    db_session.add(plataforma)
+    db_session.flush()
+    criar_usuario(db_session, plataforma, perfil="super_admin")
+    resposta = client.get(
+        "/empresas/listar/empresas", headers={"Authorization": f"Bearer {token_super_admin}"}
+    )
+    nomes = {e["nome"] for e in resposta.json()}
+    assert empresa.nome in nomes
+    assert "Sistema MedStock" not in nomes
