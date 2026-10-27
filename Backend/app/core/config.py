@@ -17,6 +17,8 @@ class Settings(BaseSettings):
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 60
     DEFINIR_SENHA_TOKEN_EXPIRE_MINUTES: int = 2880
     FRONTEND_URL: str = "http://localhost:3000"
+    # Origens extras liberadas no CORS, separadas por vírgula (ex.: domínio de homologação).
+    CORS_ORIGINS_EXTRAS: str = ""
     SUPER_ADMIN_EMAIL: str
     SUPER_ADMIN_SENHA: str
     EMAIL_REMETENTE: str
