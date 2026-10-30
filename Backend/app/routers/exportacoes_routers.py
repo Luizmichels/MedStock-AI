@@ -58,7 +58,7 @@ def exportar_previsoes(
     db: Session = Depends(get_db),
     current_user: Usuario = Depends(get_current_user),
 ):
-    """Previsão diária por material (próximos 7, 15 e 30 dias)."""
+    """Previsão mensal por material (próximos 3 meses do modelo ativo)."""
     _validar_formato(formato)
     relatorio = dados.montar_relatorio_previsoes(db, current_user.empresa_id)
     return _exportar(relatorio, formato, "previsoes", current_user)

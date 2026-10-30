@@ -9,7 +9,8 @@ from app.models.classificacao_abc import ClassificacaoABC
 from app.models.consumo_tratado import ConsumoTratado
 from app.models.importacoes import Importacao
 from app.models.itens import Item
-from app.models.previsao_diaria import PrevisaoDiaria
+from app.models.modelo_treinado import ModeloTreinado
+from app.models.previsoes import Previsao
 from app.schemas.dashboard_schemas import (
     CoberturaPrevisao,
     ConsumoSetor,
@@ -20,7 +21,7 @@ from app.schemas.dashboard_schemas import (
     MaterialFiltro,
     OpcoesFiltroResponse,
     PontoMensal,
-    PrevisaoProximosDias,
+    PrevisaoProximoMes,
 )
 
 # Teto de meses de uma série mensal (evita laços enormes com datas absurdas).
@@ -82,7 +83,7 @@ def possui_dados(db: Session, empresa_id: int) -> bool:
 def cobertura_previsao(
     db: Session, empresa_id: int, filtros: FiltrosDashboard | None = None
 ) -> CoberturaPrevisao:
-    """Dos itens consumidos no filtro, quantos têm previsão diária gerada, e que
+    """Dos itens consumidos no filtro, quantos têm previsão do modelo ativo, e que
     parcela do valor consumido eles representam (a métrica principal: itens de
     alto valor pesam mais que itens esporádicos de baixo valor)."""
     por_item = (
@@ -96,8 +97,9 @@ def cobertura_previsao(
     )
     com_previsao = {
         iid
-        for (iid,) in db.query(PrevisaoDiaria.item_id)
-        .filter(PrevisaoDiaria.empresa_id == empresa_id)
+        for (iid,) in db.query(Previsao.item_id)
+        .join(ModeloTreinado, ModeloTreinado.id == Previsao.modelo_id)
+        .filter(Previsao.empresa_id == empresa_id, ModeloTreinado.ativo.is_(True))
         .distinct()
         .all()
     }
@@ -222,20 +224,29 @@ def consumo_por_setor(
     ]
 
 
-def previsao_proximos_dias(
-    db: Session, empresa_id: int, filtros: FiltrosDashboard | None = None, *, dias: int = 30
-) -> PrevisaoProximosDias:
-    """Previsão diária somada nos próximos ``dias``, para os materiais do filtro.
+def previsao_proximo_mes(
+    db: Session, empresa_id: int, filtros: FiltrosDashboard | None = None
+) -> PrevisaoProximoMes:
+    """Previsão do modelo mensal ativo para o próximo mês, somada entre os
+    materiais do filtro.
 
     A previsão é por material (não por setor), então os filtros de competência e
     de setor não se aplicam; valem material, grupo, subgrupo e classe. O valor
     estimado usa o preço médio histórico de cada material (valor ÷ quantidade)."""
     filtros = filtros or FiltrosDashboard()
-    consulta = db.query(PrevisaoDiaria.item_id, PrevisaoDiaria.data, PrevisaoDiaria.quantidade_prevista).filter(
-        PrevisaoDiaria.empresa_id == empresa_id
+    modelo = (
+        db.query(ModeloTreinado)
+        .filter(ModeloTreinado.empresa_id == empresa_id, ModeloTreinado.ativo.is_(True))
+        .first()
     )
+    if modelo is None:
+        return PrevisaoProximoMes(mes=None, quantidade_prevista=0.0, valor_estimado=0.0, itens_com_previsao=0)
+
+    base = db.query(Previsao).filter(Previsao.empresa_id == empresa_id, Previsao.modelo_id == modelo.id)
+    mes = base.with_entities(func.min(Previsao.periodo)).scalar()
+    consulta = base.filter(Previsao.periodo == mes).with_entities(Previsao.item_id, Previsao.quantidade_prevista)
     if filtros.item_ids:
-        consulta = consulta.filter(PrevisaoDiaria.item_id.in_(filtros.item_ids))
+        consulta = consulta.filter(Previsao.item_id.in_(filtros.item_ids))
     condicoes = [Item.empresa_id == empresa_id]
     if filtros.grupos:
         condicoes.append(Item.grupo_material.in_(filtros.grupos))
@@ -244,13 +255,8 @@ def previsao_proximos_dias(
     if filtros.classes:
         condicoes.append(Item.classe_material.in_(filtros.classes))
     if len(condicoes) > 1:
-        consulta = consulta.filter(PrevisaoDiaria.item_id.in_(select(Item.id).where(*condicoes)))
-
-    por_item: dict[int, list[float]] = {}
-    primeiro_dia = None
-    for item_id, dia, quantidade in consulta.order_by(PrevisaoDiaria.item_id, PrevisaoDiaria.data):
-        por_item.setdefault(item_id, []).append(float(quantidade))
-        primeiro_dia = dia if primeiro_dia is None or dia < primeiro_dia else primeiro_dia
+        consulta = consulta.filter(Previsao.item_id.in_(select(Item.id).where(*condicoes)))
+    por_item = {item_id: float(qtd) for item_id, qtd in consulta.all()}
 
     precos = {
         iid: float(v) / float(q)
@@ -265,19 +271,12 @@ def previsao_proximos_dias(
         if q
     } if por_item else {}
 
-    quantidade_total = valor_total = 0.0
-    for item_id, valores in por_item.items():
-        soma = sum(valores[:dias])
-        quantidade_total += soma
-        valor_total += soma * precos.get(item_id, 0.0)
-    return PrevisaoProximosDias(
-        dias=dias,
-        quantidade_prevista=round(quantidade_total, 3),
-        valor_estimado=round(valor_total, 2),
+    return PrevisaoProximoMes(
+        mes=mes if por_item else None,
+        quantidade_prevista=round(sum(por_item.values()), 3),
+        valor_estimado=round(sum(q * precos.get(i, 0.0) for i, q in por_item.items()), 2),
         itens_com_previsao=len(por_item),
-        base=primeiro_dia - relativedelta(days=1) if primeiro_dia else None,
     )
-
 
 def _tem_filtro(filtros: FiltrosDashboard | None) -> bool:
     return filtros is not None and any(bool(v) for v in vars(filtros).values())

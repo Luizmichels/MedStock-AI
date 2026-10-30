@@ -21,7 +21,7 @@ class PontoMensal(BaseModel):
 
 
 class CoberturaPrevisao(BaseModel):
-    """Quanto do consumo (no filtro) está coberto por previsão diária gerada."""
+    """Quanto do consumo (no filtro) está coberto pela previsão do modelo ativo."""
 
     itens_consumidos: int
     itens_com_previsao: int
@@ -31,15 +31,14 @@ class CoberturaPrevisao(BaseModel):
     percentual_itens: float
 
 
-class PrevisaoProximosDias(BaseModel):
-    """Soma da previsão diária dos próximos ``dias`` para os materiais do filtro."""
+class PrevisaoProximoMes(BaseModel):
+    """Previsão do próximo mês (modelo mensal ativo) para os materiais do filtro."""
 
-    dias: int
+    mes: date | None = None  # 1º dia do mês previsto
     quantidade_prevista: float
     # Quantidade prevista x preço médio histórico de cada material.
     valor_estimado: float
     itens_com_previsao: int
-    base: date | None = None  # último dia com dados (a previsão começa no dia seguinte)
 
 
 class ConsumoSetor(BaseModel):

@@ -13,7 +13,8 @@ import pandas as pd
 from app.models.classificacao_abc import ClassificacaoABC
 from app.models.consumo_tratado import ConsumoTratado
 from app.models.itens import Item
-from app.models.previsao_diaria import PrevisaoDiaria
+from app.models.modelo_treinado import ModeloTreinado
+from app.models.previsoes import Previsao
 from app.services.exportacao import dados
 from app.services.exportacao.excel import gerar_xlsx
 from app.services.exportacao.pdf import LIMITE_LINHAS_PDF, ContextoExportacao, gerar_pdf
@@ -37,12 +38,31 @@ def _tratado(db, empresa, item, periodo, qtd, valor, setor="Central") -> None:
     ))
 
 
-def _previsao_diaria(db, empresa, item, dias=30, qtd=2.0) -> None:
-    for d in range(dias):
-        db.add(PrevisaoDiaria(
-            empresa_id=empresa.id, item_id=item.id, data=date(2024, 7, 1) + pd.Timedelta(days=d),
-            quantidade_prevista=qtd, metodo="croston_sba",
+def _previsoes(db, empresa, item, valores=(10.0, 20.0, 30.0), *, algoritmo="holt_winters", mae=4.0):
+    """Modelo ativo da empresa (criado na 1ª chamada) com a previsão mensal do item."""
+    modelo = (
+        db.query(ModeloTreinado)
+        .filter(ModeloTreinado.empresa_id == empresa.id, ModeloTreinado.ativo.is_(True))
+        .first()
+    )
+    if modelo is None:
+        modelo = ModeloTreinado(
+            empresa_id=empresa.id, algoritmo="melhor_por_item", ativo=True,
+            treinado_em=datetime(2026, 10, 1, 8, 0), parametros={"itens": {}},
+        )
+        db.add(modelo)
+        db.flush()
+    modelo.parametros = {
+        "itens": {**modelo.parametros["itens"], str(item.id): {"algoritmo": algoritmo, "mae": mae}}
+    }
+    for i, v in enumerate(valores):
+        db.add(Previsao(
+            empresa_id=empresa.id, modelo_id=modelo.id, item_id=item.id,
+            periodo=date(2024, 7 + i, 1), quantidade_prevista=v,
+            intervalo_inferior=v * 0.8, intervalo_superior=v * 1.2,
         ))
+    # Referência: último mês com dados = junho/2024.
+    _tratado(db, empresa, item, date(2024, 6, 1), 1, 1)
 
 
 def _abc(db, empresa, item, classe) -> None:
@@ -54,9 +74,9 @@ def _abc(db, empresa, item, classe) -> None:
 # --------------------------------------------------------------------------- #
 # Camada de dados
 # --------------------------------------------------------------------------- #
-def test_relatorio_previsoes_uma_linha_por_material_com_horizontes(db_session, empresa):
+def test_relatorio_previsoes_uma_linha_por_material_com_os_3_meses(db_session, empresa):
     item = _item(db_session, empresa, unidade_medida="AMP")
-    _previsao_diaria(db_session, empresa, item, dias=30, qtd=2.0)
+    _previsoes(db_session, empresa, item, (10.0, 20.0, 30.0))
     _abc(db_session, empresa, item, "A")
     db_session.commit()
 
@@ -65,17 +85,30 @@ def test_relatorio_previsoes_uma_linha_por_material_com_horizontes(db_session, e
     assert len(rel.tabela) == 1
     linha = rel.tabela.iloc[0]
     assert (linha["Unid."], linha["Curva ABC"]) == ("AMP", "A")
-    assert (linha["Próx. 7 dias"], linha["Próx. 30 dias"]) == (14.0, 60.0)
-    assert linha["Média diária"] == 2.0
+    assert (linha["Mês 1"], linha["Mês 2"], linha["Mês 3"], linha["Total 3 meses"]) == (10.0, 20.0, 30.0, 60.0)
     assert ("Curva A", "1") in rel.indicadores
-    assert "30/06/2024" in rel.referencia
+    assert ("Modelo treinado em", "01/10/2026") in rel.indicadores
+    assert "Mês 1 = 07/2024" in rel.referencia and "06/2024" in rel.referencia
+
+
+def test_relatorio_previsoes_detalhe_mensal_no_excel(db_session, empresa):
+    item = _item(db_session, empresa)
+    _previsoes(db_session, empresa, item, (100.0, 110.0, 120.0), algoritmo="holt_winters", mae=4.0)
+    db_session.commit()
+
+    detalhe = dados.montar_relatorio_previsoes(db_session, empresa.id).abas_extras["Detalhe mensal"]
+    assert list(detalhe.columns) == dados.COLUNAS_PREVISAO_MENSAL
+    assert list(detalhe["Competência"]) == ["07/2024", "08/2024", "09/2024"]
+    assert set(detalhe["Modelo"]) == {"Holt-Winters"}
+    primeira = detalhe.iloc[0]
+    assert (primeira["Mínimo"], primeira["Máximo"], primeira["Erro médio (MAE)"]) == (80.0, 120.0, 4.0)
 
 
 def test_relatorio_previsoes_ordena_por_curva_abc(db_session, empresa):
     c = _item(db_session, empresa, "C1")
     a = _item(db_session, empresa, "A1")
     for item, classe in ((c, "C"), (a, "A")):
-        _previsao_diaria(db_session, empresa, item, dias=1)
+        _previsoes(db_session, empresa, item)
         _abc(db_session, empresa, item, classe)
     db_session.commit()
     rel = dados.montar_relatorio_previsoes(db_session, empresa.id)
@@ -83,8 +116,8 @@ def test_relatorio_previsoes_ordena_por_curva_abc(db_session, empresa):
 
 
 def test_relatorio_previsoes_isolado_por_empresa(db_session, empresa, empresa_secundaria):
-    _previsao_diaria(db_session, empresa, _item(db_session, empresa), dias=1)
-    _previsao_diaria(db_session, empresa_secundaria, _item(db_session, empresa_secundaria, "OUTRO"), dias=1)
+    _previsoes(db_session, empresa, _item(db_session, empresa))
+    _previsoes(db_session, empresa_secundaria, _item(db_session, empresa_secundaria, "OUTRO"))
     db_session.commit()
     assert len(dados.montar_relatorio_previsoes(db_session, empresa.id).tabela) == 1
 

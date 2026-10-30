@@ -11,7 +11,7 @@ import {
   exportarConsumo,
   exportarPrevisoes,
   resumoDashboard,
-  resumoDiario,
+  resumoPrevisoes,
   salvarArquivo,
 } from "@/lib/api";
 import { mensagemErro } from "@/lib/erros";
@@ -30,7 +30,7 @@ const RELATORIOS: {
   {
     chave: "previsoes",
     nome: "Previsão de consumo por material",
-    desc: "Uma linha por material com a previsão dos próximos 7, 15 e 30 dias e a média diária, ordenada pela curva ABC.",
+    desc: "Uma linha por material com a previsão de cada um dos próximos 3 meses e o total, ordenada pela curva ABC. No Excel, uma aba extra traz o detalhe mês a mês com o modelo escolhido, a faixa de incerteza e o erro da validação.",
     icone: "previsoes",
     exigePrevisao: true,
   },
@@ -71,9 +71,9 @@ export default function ExportarPage() {
   const [erro, setErro] = useState("");
 
   useEffect(() => {
-    Promise.all([resumoDashboard(), resumoDiario()])
+    Promise.all([resumoDashboard(), resumoPrevisoes()])
       .then(([r, previsoes]) => {
-        setTemPrevisao(previsoes.length > 0);
+        setTemPrevisao(previsoes.itens.length > 0);
         setEstado(r.possui_dados ? "pronto" : "vazio");
       })
       .catch(() => setEstado("pronto")); // na dúvida, deixa exportar
@@ -254,7 +254,7 @@ export default function ExportarPage() {
             )}
             {avisoPrevisao && (
               <p className="rounded-[10px] bg-[#FDF1DC] px-3.5 py-2.5 text-[13px] text-[#9A6212]">
-                Ainda não há previsões diárias geradas, então este relatório sairá vazio. Gere as previsões na tela de
+                Ainda não há previsões geradas, então este relatório sairá vazio. Treine os modelos na tela de
                 Previsões.
               </p>
             )}

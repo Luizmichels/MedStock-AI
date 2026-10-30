@@ -23,18 +23,18 @@ import {
   KpisResponse,
   OpcoesFiltroResponse,
   PontoMensal,
-  PrevisaoProximosDias,
+  PrevisaoProximoMes,
   classificacaoAbc,
   consumoMensal,
   consumoSetor,
-  previsaoProximosDias,
+  previsaoProximoMes,
   opcoesFiltro,
   resumoDashboard,
 } from "@/lib/api";
 import {
   fmtCompacto,
   fmtCompetencia,
-  fmtData,
+  fmtMesAno,
   fmtMesAnoNumerico,
   fmtMoeda,
   fmtNumero,
@@ -51,7 +51,7 @@ interface Dados {
   anterior: PontoMensal[];
   setores: ConsumoSetor[];
   abc: DistribuicaoABC[];
-  previsao: PrevisaoProximosDias;
+  previsao: PrevisaoProximoMes;
 }
 
 /** Nº de meses do intervalo "AAAA-MM" a "AAAA-MM", contando as pontas. */
@@ -157,7 +157,7 @@ export default function DashboardPage() {
           consumoMensal(12, { ...params, data_inicio: `${anterior.inicio}-01`, data_fim: `${anterior.fim}-01` }),
           consumoSetor(params),
           classificacaoAbc(params),
-          previsaoProximosDias(params, 30),
+          previsaoProximoMes(params),
         ])
           .then(
             ([mensal, mensalAnterior, porSetor, abc, previsao]) =>
@@ -310,15 +310,15 @@ function Kpis({
           : `sem consumo em ${rotuloAnterior}`,
     },
     {
-      label: "Previsão dos próximos 30 dias",
+      label: "Previsão do próximo mês",
       valor: temPrevisao ? fmtCompacto(previsao.valor_estimado, { moeda: true }) : "—",
       dica:
-        "Previsão diária somada dos próximos 30 dias. O valor é estimado pelo preço médio histórico de cada material." +
+        "Consumo previsto pelo modelo mensal para o próximo mês. O valor é estimado pelo preço médio histórico de cada material." +
         (temPrevisao ? ` Quantidade prevista: ${fmtQuantidade(previsao.quantidade_prevista)}.` : ""),
       nota: !temPrevisao
-        ? "previsões diárias ainda não geradas"
+        ? "modelos ainda não treinados"
         : `${fmtQuantidade(Math.round(previsao.quantidade_prevista))} unidades` +
-          (previsao.base ? ` · a partir de ${fmtData(previsao.base)}` : "") +
+          (previsao.mes ? ` · ${fmtMesAno(previsao.mes)}` : "") +
           (filtroSetor ? " · não filtra por setor" : ""),
     },
   ];
