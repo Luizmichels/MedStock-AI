@@ -16,28 +16,28 @@ import {
   ItemResponse,
   MaterialFiltro,
   ModeloTreinadoResponse,
-  PrevisaoDiariaDetalhe,
-  ResumoDiarioItem,
-  detalheDiario,
-  gerarPrevisaoDiaria,
-  listarConsumos,
+  PrevisaoMensalDetalhe,
+  ResumoPrevisaoItem,
+  detalheMensal,
   listarItens,
   listarModelos,
   resumoDashboard,
-  resumoDiario,
+  resumoPrevisoes,
   statusTreino,
   treinarPrevisoes,
 } from "@/lib/api";
 import { papel, useAuth } from "@/lib/auth";
 import { mensagemErro } from "@/lib/erros";
-import { esperar, fmtData, fmtDataHora, fmtDiaMes, fmtNumero, isoData, lerData, somarDias } from "@/lib/formato";
+import { esperar, fmtDataHora, fmtMesAno, fmtNumero } from "@/lib/formato";
 
-type Horizonte = 7 | 15 | 30;
 type Estado = "carregando" | "semDados" | "semPrevisoes" | "pronto" | "erro";
 
-const HORIZONTES: Horizonte[] = [7, 15, 30];
-const DIAS_HISTORICO = 45;
+const MESES_HISTORICO = 12;
+// Meses previstos pelo modelo (o mesmo horizonte da validação no treino).
+const HORIZONTE_MESES = 3;
 const POR_PAGINA = 25;
+// Colunas: material, curva ABC, unidade, um por mês previsto e total.
+const GRADE = "grid-cols-[minmax(220px,2.4fr)_50px_60px_repeat(3,minmax(84px,1fr))_minmax(100px,1fr)]"; // 3 = HORIZONTE_MESES
 
 const OPCOES_ABC = ["A", "B", "C"].map((c) => ({ valor: c, rotulo: `Curva ${c}` }));
 
@@ -52,8 +52,16 @@ const CLASSES: Record<string, [string, string]> = {
   C: ["#CFE6F7", "#1F5FA0"],
 };
 
-function totalNoHorizonte(r: ResumoDiarioItem, h: Horizonte): number {
-  return h === 7 ? r.sete_dias : h === 15 ? r.quinze_dias : r.trinta_dias;
+const ROTULO_ALGORITMO: Record<string, string> = {
+  sma: "Média móvel (SMA)",
+  sarima: "ARIMA",
+  holt_winters: "Holt-Winters",
+  random_forest: "Random Forest",
+  gradient_boosting: "Gradient Boosting",
+};
+
+function rotuloAlgoritmo(algoritmo: string): string {
+  return ROTULO_ALGORITMO[algoritmo] ?? algoritmo;
 }
 
 /** Busca todos os itens (a rota é paginada, no máximo 200 por página). */
@@ -66,29 +74,6 @@ async function carregarTodosItens(): Promise<Map<number, ItemResponse>> {
   const mapa = new Map<number, ItemResponse>();
   for (const p of [primeira, ...resto]) for (const item of p.itens) mapa.set(item.id, item);
   return mapa;
-}
-
-/** Consumo diário do item (somado entre setores) nos últimos DIAS_HISTORICO dias até a base. */
-async function carregarHistorico(itemId: number, base: Date): Promise<number[]> {
-  const inicio = somarDias(base, -(DIAS_HISTORICO - 1));
-  const porDia = new Map<string, number>();
-  for (let pagina = 1; ; pagina++) {
-    const p = await listarConsumos({
-      item_id: itemId,
-      data_inicio: isoData(inicio),
-      data_fim: isoData(base),
-      tamanho: 200,
-      pagina,
-    });
-    for (const c of p.itens) porDia.set(c.data, (porDia.get(c.data) ?? 0) + c.quantidade);
-    if (pagina * 200 >= p.total || p.itens.length === 0) break;
-  }
-  return Array.from({ length: DIAS_HISTORICO }, (_, i) => porDia.get(isoData(somarDias(inicio, i))) ?? 0);
-}
-
-/** "Impressão digital" do resumo, para perceber quando a geração diária terminou. */
-function assinatura(res: ResumoDiarioItem[]): string {
-  return `${res.length}|${res[0]?.base ?? ""}|${res.slice(0, 5).map((r) => r.trinta_dias).join(",")}`;
 }
 
 export default function PrevisoesPage() {
@@ -106,33 +91,30 @@ export default function PrevisoesPage() {
   }, []);
 
   const [estado, setEstado] = useState<Estado>("carregando");
-  const [resumo, setResumo] = useState<ResumoDiarioItem[]>([]);
+  const [resumo, setResumo] = useState<ResumoPrevisaoItem[]>([]);
   const [itens, setItens] = useState<Map<number, ItemResponse>>(new Map());
   const [modelo, setModelo] = useState<ModeloTreinadoResponse | null>(null);
 
-  const [horizonte, setHorizonte] = useState<Horizonte>(30);
   const [material, setMaterial] = useState<SelecaoMaterial>(SELECAO_VAZIA);
   const [abc, setAbc] = useState<string[]>([]);
   const [pagina, setPagina] = useState(1);
   const [selecionado, setSelecionado] = useState<number | null>(null);
 
-  const [detalhe, setDetalhe] = useState<PrevisaoDiariaDetalhe | null>(null);
-  const [historico, setHistorico] = useState<number[] | null>(null);
-  const [carregandoGrafico, setCarregandoGrafico] = useState(false);
+  const [mensal, setMensal] = useState<PrevisaoMensalDetalhe | null>(null);
+  const [carregandoMensal, setCarregandoMensal] = useState(false);
 
-  const [gerando, setGerando] = useState(false);
   const [treinando, setTreinando] = useState(false);
 
   const carregar = useCallback(async () => {
     try {
-      const [res, dash, modelos] = await Promise.all([resumoDiario(), resumoDashboard(), listarModelos()]);
+      const [res, dash, modelos] = await Promise.all([resumoPrevisoes(), resumoDashboard(), listarModelos()]);
       if (!montado.current) return;
       setModelo(modelos.find((m) => m.ativo) ?? modelos[0] ?? null);
       if (!dash.possui_dados) {
         setEstado("semDados");
         return;
       }
-      if (res.length === 0) {
+      if (res.itens.length === 0) {
         setResumo([]);
         setEstado("semPrevisoes");
         return;
@@ -140,7 +122,7 @@ export default function PrevisoesPage() {
       const mapa = await carregarTodosItens();
       if (!montado.current) return;
       setItens(mapa);
-      setResumo(res);
+      setResumo(res.itens);
       setEstado("pronto");
     } catch {
       if (montado.current) setEstado("erro");
@@ -150,6 +132,12 @@ export default function PrevisoesPage() {
   useEffect(() => {
     carregar();
   }, [carregar]);
+
+  // Todos os itens partem da mesma referência, então os meses são os mesmos.
+  const meses = useMemo(
+    () => resumo[0]?.previsoes.slice(0, HORIZONTE_MESES).map((p) => p.periodo) ?? [],
+    [resumo],
+  );
 
   const linhas = useMemo(() => {
     return resumo
@@ -162,10 +150,10 @@ export default function PrevisoesPage() {
           contem(material.classes, item?.classe_material) &&
           contem(abc, item?.classe_abc),
       )
-      .sort((a, b) => totalNoHorizonte(b.r, horizonte) - totalNoHorizonte(a.r, horizonte));
-  }, [resumo, itens, material, abc, horizonte]);
+      .sort((a, b) => b.r.total - a.r.total);
+  }, [resumo, itens, material, abc]);
 
-  useEffect(() => setPagina(1), [material, abc, horizonte]);
+  useEffect(() => setPagina(1), [material, abc]);
 
   // Materiais do filtro: só os que têm previsão, com os atributos para a cascata.
   const materiaisFiltro = useMemo<MaterialFiltro[]>(
@@ -193,94 +181,54 @@ export default function PrevisoesPage() {
     }
   }, [linhas, selecionado]);
 
-  // Gráfico do material selecionado: histórico diário + previsão diária.
+  // Gráfico do material selecionado: histórico mensal + previsão do modelo ativo.
   useEffect(() => {
     if (selecionado == null) return;
-    const r = resumo.find((x) => x.item_id === selecionado);
-    if (!r) return;
     let ativo = true;
-    setCarregandoGrafico(true);
-    Promise.all([detalheDiario(selecionado), carregarHistorico(selecionado, lerData(r.base))])
-      .then(([d, h]) => {
-        if (!ativo) return;
-        setDetalhe(d);
-        setHistorico(h);
-      })
-      .catch(() => {
-        if (!ativo) return;
-        setDetalhe(null);
-        setHistorico(null);
-      })
-      .finally(() => ativo && setCarregandoGrafico(false));
+    setCarregandoMensal(true);
+    detalheMensal(selecionado)
+      .then((d) => ativo && setMensal(d))
+      .catch(() => ativo && setMensal(null))
+      .finally(() => ativo && setCarregandoMensal(false));
     return () => {
       ativo = false;
     };
   }, [selecionado, resumo]);
-
-  async function gerar() {
-    setGerando(true);
-    try {
-      const antes = assinatura(resumo);
-      await gerarPrevisaoDiaria();
-      notificar("Gerando as previsões diárias… a tela atualiza sozinha ao terminar.");
-      // Não há rota de status para a geração diária: consulta até o resultado mudar (máx. ~1 min).
-      for (let i = 0; i < 20 && montado.current; i++) {
-        await esperar(3000);
-        const res = await resumoDiario();
-        if (res.length > 0 && assinatura(res) !== antes) break;
-      }
-      if (!montado.current) return;
-      await carregar();
-      notificar("Previsões diárias atualizadas.");
-    } catch (e) {
-      notificar(mensagemErro(e, "Não foi possível gerar as previsões."));
-    } finally {
-      if (montado.current) setGerando(false);
-    }
-  }
 
   async function treinar() {
     setTreinando(true);
     try {
       const anterior = modelo?.id ?? null;
       await treinarPrevisoes();
-      notificar("Treinamento do modelo mensal iniciado. Pode levar alguns minutos.");
+      notificar("Treinando os modelos e atualizando as previsões. Pode levar alguns minutos.");
       for (let i = 0; i < 200 && montado.current; i++) {
         await esperar(3000);
         const st = await statusTreino();
         if (st.em_andamento) continue;
         setModelo(st.ultimo_modelo);
+        await carregar();
         notificar(
           st.ultimo_modelo && st.ultimo_modelo.id !== anterior
-            ? "Modelo mensal treinado com sucesso."
-            : "O treino terminou sem gerar um modelo novo (há itens com histórico suficiente?).",
+            ? "Modelos treinados e previsões atualizadas."
+            : "O treino terminou sem gerar um modelo novo. É preciso ter materiais com pelo menos 3 meses de histórico.",
         );
         break;
       }
     } catch (e) {
-      notificar(mensagemErro(e, "Não foi possível treinar o modelo."));
+      notificar(mensagemErro(e, "Não foi possível treinar os modelos."));
     } finally {
       if (montado.current) setTreinando(false);
     }
   }
 
   const acoesAdmin = isAdmin && (estado === "pronto" || estado === "semPrevisoes") && (
-    <div className="flex flex-wrap gap-2">
-      <button
-        onClick={treinar}
-        disabled={treinando}
-        className="h-9 rounded-full border border-brand bg-white px-4 text-[13px] font-bold text-brand-800 transition hover:bg-surface-sky disabled:cursor-not-allowed disabled:opacity-60"
-      >
-        {treinando ? "Treinando…" : "Treinar modelo mensal"}
-      </button>
-      <button
-        onClick={gerar}
-        disabled={gerando}
-        className="h-9 rounded-full bg-brand px-4 text-[13px] font-bold text-white transition hover:bg-brand-600 disabled:cursor-not-allowed disabled:opacity-60"
-      >
-        {gerando ? "Gerando…" : "Gerar previsões diárias"}
-      </button>
-    </div>
+    <button
+      onClick={treinar}
+      disabled={treinando}
+      className="h-9 rounded-full bg-brand px-4 text-[13px] font-bold text-white transition hover:bg-brand-600 disabled:cursor-not-allowed disabled:opacity-60"
+    >
+      {treinando ? "Treinando…" : "Treinar modelos"}
+    </button>
   );
 
   const selecionadoLinha = linhas.find((l) => l.r.item_id === selecionado) ?? null;
@@ -292,7 +240,7 @@ export default function PrevisoesPage() {
     <>
       <PageHeader
         title="Previsões"
-        subtitle="Consumo previsto para os próximos 7, 15 ou 30 dias, por material"
+        subtitle={`Consumo previsto por material para os próximos ${HORIZONTE_MESES} meses`}
         acoes={acoesAdmin || undefined}
       />
 
@@ -305,19 +253,19 @@ export default function PrevisoesPage() {
         </div>
       )}
       {estado === "semDados" && (
-        <SemDadosImportados descricao="As previsões aparecem depois da primeira importação de consumo. Importe o histórico e gere as previsões diárias para ver os horizontes de 7, 15 e 30 dias." />
+        <SemDadosImportados descricao="As previsões aparecem depois da primeira importação de consumo. Importe o histórico e treine os modelos para ver as previsões." />
       )}
       {estado === "semPrevisoes" && (
         <div className="previa-card flex flex-col items-center gap-2.5 px-6 py-12 text-center">
           <h2 className="text-lg font-bold text-navy">As previsões ainda não foram geradas</h2>
           <p className="max-w-[460px] text-sm leading-relaxed text-muted">
             {isAdmin
-              ? "Os dados de consumo já estão na base. Gere as previsões diárias para ver os horizontes de 7, 15 e 30 dias por material."
-              : "Os dados já foram importados, mas o administrador ainda não gerou as previsões."}
+              ? "Os dados de consumo já estão na base. Treine os modelos para ver a previsão dos próximos 3 meses por material."
+              : "Os dados já foram importados, mas o administrador ainda não treinou os modelos."}
           </p>
           {isAdmin && (
-            <button onClick={gerar} disabled={gerando} className="previa-btn mt-3">
-              {gerando ? "GERANDO…" : "GERAR PREVISÕES AGORA"}
+            <button onClick={treinar} disabled={treinando} className="previa-btn mt-3">
+              {treinando ? "TREINANDO…" : "TREINAR MODELOS"}
             </button>
           )}
         </div>
@@ -329,24 +277,6 @@ export default function PrevisoesPage() {
           <BarraFiltros>
             <CamposMaterial materiais={materiaisFiltro} valor={material} onChange={setMaterial} />
             <MultiSelecao rotulo="Curva ABC" largura="min-w-[120px] flex-[0.7]" opcoes={OPCOES_ABC} selecionados={abc} onChange={setAbc} />
-            <div className="relative flex h-11 flex-none items-center rounded-md border border-[#B9C6D4] bg-white px-[3px]">
-              <span className="pointer-events-none absolute -top-[9px] left-2 bg-white px-1 text-[11.5px] font-semibold leading-[18px] text-muted">
-                Horizonte
-              </span>
-              {HORIZONTES.map((h) => (
-                <button
-                  key={h}
-                  onClick={() => setHorizonte(h)}
-                  className="h-[34px] rounded px-3.5 text-[13px] font-bold transition"
-                  style={{
-                    background: horizonte === h ? "#0A2540" : "transparent",
-                    color: horizonte === h ? "#fff" : "#5B6B7E",
-                  }}
-                >
-                  {h} dias
-                </button>
-              ))}
-            </div>
             {(contarSelecao(material) > 0 || abc.length > 0) && (
               <button
                 onClick={() => {
@@ -364,9 +294,9 @@ export default function PrevisoesPage() {
                 <path d="M12 7v5l3 2" />
               </svg>
               <div className="flex flex-col leading-snug">
-                <span className="text-xs text-muted">Modelo mensal</span>
+                <span className="text-xs text-muted">Modelos</span>
                 <span className="text-[13px] font-bold text-navy">
-                  {modelo ? `Treinado em ${fmtDataHora(modelo.treinado_em)}` : "Ainda não treinado"}
+                  {modelo ? `Treinados em ${fmtDataHora(modelo.treinado_em)}` : "Ainda não treinados"}
                 </span>
                 {modelo?.mae != null && (
                   <span className="text-[11.5px] text-muted-400">
@@ -379,50 +309,45 @@ export default function PrevisoesPage() {
 
           {/* Gráfico do material selecionado */}
           {selecionadoLinha && (
-            <CartaoGrafico
-              linha={selecionadoLinha}
-              horizonte={horizonte}
-              detalhe={detalhe}
-              historico={historico}
-              carregando={carregandoGrafico}
-            />
+            <CartaoGrafico linha={selecionadoLinha} mensal={mensal} carregando={carregandoMensal} />
           )}
 
           {/* Tabela */}
-          <div className="previa-card overflow-hidden p-0">
+          {/* Em telas estreitas a tabela rola na horizontal (senão o Total é cortado). */}
+          <div className="previa-card overflow-x-auto p-0">
             <div className="flex flex-wrap items-baseline justify-between gap-3 px-[22px] py-4">
               <h3 className="text-base font-bold">Materiais e previsões estimadas</h3>
               <span className="text-xs text-muted">
                 {fmtNumero(linhas.length)} de {fmtNumero(resumo.length)} materiais · clique para ver no gráfico
               </span>
             </div>
-            <div className="grid grid-cols-[minmax(220px,2.6fr)_70px_minmax(100px,1fr)_minmax(120px,1fr)_50px] gap-3 border-y border-line-200 bg-surface-panel px-[22px] py-2.5 text-xs font-bold text-muted">
+            <div className={`grid ${GRADE} gap-3 border-y border-line-200 bg-surface-panel px-[22px] py-2.5 text-xs font-bold text-muted`}>
               <span>Material</span>
-              <span>Unid.</span>
-              <span className="text-right">Média diária</span>
-              <span className="text-right">Previsão {horizonte} dias</span>
               <span className="text-center">ABC</span>
+              <span>Unid.</span>
+              {meses.map((m) => (
+                <span key={m} className="text-right">
+                  {fmtMesAno(m)}
+                </span>
+              ))}
+              <span className="text-right">Total {HORIZONTE_MESES} meses</span>
             </div>
             {paginaAtual.length === 0 ? (
               <div className="px-7 py-7 text-center text-sm text-muted">Nenhum material encontrado.</div>
             ) : (
               paginaAtual.map(({ r, item }) => {
-                const total = totalNoHorizonte(r, horizonte);
                 const cls = item?.classe_abc ?? null;
                 return (
                   <button
                     key={r.item_id}
                     onClick={() => setSelecionado(r.item_id)}
-                    className="grid w-full grid-cols-[minmax(220px,2.6fr)_70px_minmax(100px,1fr)_minmax(120px,1fr)_50px] items-center gap-3 border-b border-[#F0F4F8] px-[22px] py-3 text-left text-[13px] transition hover:bg-[#F5F9FD]"
+                    className={`grid w-full ${GRADE} items-center gap-3 border-b border-[#F0F4F8] px-[22px] py-3 text-left text-[13px] transition hover:bg-[#F5F9FD]`}
                     style={{ background: r.item_id === selecionado ? "#EAF3FB" : undefined }}
                   >
                     <span className="flex min-w-0 flex-col">
                       <span className="truncate font-semibold">{item?.descricao_item ?? `Item ${r.item_id}`}</span>
                       <span className="font-mono text-[11px] text-muted-400">{item?.codigo_item ?? "—"}</span>
                     </span>
-                    <span className="text-muted">{item?.unidade_medida || "—"}</span>
-                    <span className="text-right">{fmtNumero(total / horizonte, 1)}</span>
-                    <span className="text-right font-bold text-navy">{fmtNumero(total, 1)}</span>
                     <span className="flex justify-center">
                       {cls && CLASSES[cls] ? (
                         <span
@@ -435,6 +360,16 @@ export default function PrevisoesPage() {
                         <span className="text-muted-400">—</span>
                       )}
                     </span>
+                    <span className="text-muted">{item?.unidade_medida || "—"}</span>
+                    {meses.map((m) => {
+                      const p = r.previsoes.find((x) => x.periodo === m);
+                      return (
+                        <span key={m} className="text-right">
+                          {p ? fmtNumero(p.quantidade_prevista, 1) : "—"}
+                        </span>
+                      );
+                    })}
+                    <span className="text-right font-bold text-navy">{fmtNumero(r.total, 1)}</span>
                   </button>
                 );
               })
@@ -474,60 +409,83 @@ export default function PrevisoesPage() {
 
 function CartaoGrafico({
   linha,
-  horizonte,
-  detalhe,
-  historico,
+  mensal,
   carregando,
 }: {
-  linha: { r: ResumoDiarioItem; item?: ItemResponse };
-  horizonte: Horizonte;
-  detalhe: PrevisaoDiariaDetalhe | null;
-  historico: number[] | null;
+  linha: { r: ResumoPrevisaoItem; item?: ItemResponse };
+  mensal: PrevisaoMensalDetalhe | null;
   carregando: boolean;
 }) {
   const { r, item } = linha;
-  const total = totalNoHorizonte(r, horizonte);
   const unidade = item?.unidade_medida || "unid.";
-  const pronto = !carregando && detalhe && historico && detalhe.item_id === r.item_id;
+  const proximo = r.previsoes[0];
+  const pronto = !carregando && mensal && mensal.item_id === r.item_id;
 
   return (
     <div className="previa-card px-[22px] py-5">
-      <div className="flex flex-wrap items-start justify-between gap-4">
-        <div className="min-w-0">
-          <span className="text-xs text-muted">Consumo diário · {unidade}</span>
-          <h3 className="mt-0.5 truncate text-lg font-bold">{item?.descricao_item ?? `Item ${r.item_id}`}</h3>
-        </div>
-        <span className="pt-1 font-mono text-xs text-muted">{item?.codigo_item}</span>
+      <div className="min-w-0">
+        <span className="text-xs text-muted">
+          Consumo mensal · {unidade}
+          {item?.codigo_item && <span className="font-mono"> · {item.codigo_item}</span>}
+        </span>
+        <h3 className="mt-0.5 truncate text-lg font-bold">{item?.descricao_item ?? `Item ${r.item_id}`}</h3>
       </div>
 
       <div className="mt-4 flex flex-wrap gap-7">
-        <Estatistica rotulo={`Previsão próximos ${horizonte} dias`} valor={`${fmtNumero(total, 1)} ${unidade}`} />
-        <Estatistica rotulo="Média diária prevista" valor={fmtNumero(total / horizonte, 1)} />
-        <Estatistica rotulo="Último dado de consumo" valor={fmtData(r.base)} />
+        {proximo && (
+          <Estatistica
+            rotulo={`Previsão ${fmtMesAno(proximo.periodo)}`}
+            valor={`${fmtNumero(proximo.quantidade_prevista, 1)} ${unidade}`}
+          />
+        )}
+        <Estatistica rotulo={`Próximos ${r.previsoes.length} meses`} valor={fmtNumero(r.total, 1)} />
+        <Estatistica rotulo="Modelo escolhido" valor={rotuloAlgoritmo(r.algoritmo)} />
+        {r.mae != null && (
+          <Estatistica
+            rotulo="Erro médio na validação (MAE)"
+            valor={`${fmtNumero(r.mae, 1)} ${unidade}`}
+            dica={r.mape != null ? `MAPE ${fmtNumero(r.mape, 1)}%` : undefined}
+          />
+        )}
       </div>
+      <p className="mt-2 text-[12px] text-muted">
+        O modelo foi escolhido para este material entre 5 algoritmos, pelo menor erro ao prever até 3 meses à frente na
+        validação. A faixa mostra a margem de incerteza de ±20%.
+      </p>
 
       {pronto ? (
-        <Grafico
-          historico={historico}
-          previsao={detalhe.dias.slice(0, horizonte).map((d) => d.quantidade_prevista)}
-          base={lerData(r.base)}
+        <GraficoMensal
+          historico={mensal.historico.slice(-MESES_HISTORICO)}
+          previsoes={mensal.previsoes.slice(0, HORIZONTE_MESES)}
+          unidade={unidade}
         />
       ) : (
         <div className="mt-[18px] grid h-[300px] place-items-center text-sm text-muted">
           {carregando ? "Carregando gráfico…" : "Não foi possível carregar o gráfico deste material."}
         </div>
       )}
+      <Legenda faixa />
+    </div>
+  );
+}
 
-      <div className="mt-4 flex flex-wrap gap-5 text-xs text-muted">
+function Legenda({ faixa }: { faixa: boolean }) {
+  return (
+    <div className="mt-4 flex flex-wrap gap-5 text-xs text-muted">
+      <span className="flex items-center gap-1.5">
+        <span className="h-[3px] w-[18px] bg-[#1F5FA0]" />
+        Consumo realizado
+      </span>
+      <span className="flex items-center gap-1.5">
+        <span className="h-0 w-[18px] border-t-[3px] border-dashed border-brand" />
+        Previsão
+      </span>
+      {faixa && (
         <span className="flex items-center gap-1.5">
-          <span className="h-[3px] w-[18px] bg-[#1F5FA0]" />
-          Consumo realizado
+          <span className="h-2.5 w-[18px] rounded-sm bg-[#4AA8E0]/20" />
+          Faixa de incerteza
         </span>
-        <span className="flex items-center gap-1.5">
-          <span className="h-0 w-[18px] border-t-[3px] border-dashed border-brand" />
-          Previsão
-        </span>
-      </div>
+      )}
     </div>
   );
 }
@@ -542,29 +500,71 @@ function Estatistica({ rotulo, valor, dica }: { rotulo: string; valor: string; d
   );
 }
 
-function Grafico({ historico, previsao, base }: { historico: number[]; previsao: number[]; base: Date }) {
+function GraficoMensal({
+  historico,
+  previsoes,
+  unidade,
+}: {
+  historico: PrevisaoMensalDetalhe["historico"];
+  previsoes: PrevisaoMensalDetalhe["previsoes"];
+  unidade: string;
+}) {
+  const [ativo, setAtivo] = useState<number | null>(null);
+
   const nHist = historico.length;
-  const n = nHist + previsao.length;
-  const maximo = Math.max(...historico, ...previsao, 1) * 1.1;
-  const X = (i: number) => (i / (n - 1)) * 840;
+  const n = nHist + previsoes.length;
+  const valores = [
+    ...historico.map((h) => h.quantidade),
+    ...previsoes.map((p) => p.intervalo_superior ?? p.quantidade_prevista),
+  ];
+  const maximo = Math.max(...valores, 1) * 1.1;
+  const X = (i: number) => (n > 1 ? (i / (n - 1)) * 840 : 420);
   const Y = (v: number) => 260 - (v / maximo) * 240;
 
-  const caminhoHist = historico.map((v, i) => `${i ? "L" : "M"}${X(i).toFixed(1)} ${Y(v).toFixed(1)}`).join(" ");
+  const caminhoHist = historico
+    .map((h, i) => `${i ? "L" : "M"}${X(i).toFixed(1)} ${Y(h.quantidade).toFixed(1)}`)
+    .join(" ");
+  const ultimo = historico[nHist - 1]?.quantidade ?? 0;
+  const inicio = `M${X(nHist - 1).toFixed(1)} ${Y(ultimo).toFixed(1)} `;
   const caminhoPrev =
-    `M${X(nHist - 1).toFixed(1)} ${Y(historico[nHist - 1]).toFixed(1)} ` +
-    previsao.map((v, k) => `L${X(nHist + k).toFixed(1)} ${Y(v).toFixed(1)}`).join(" ");
+    inicio + previsoes.map((p, k) => `L${X(nHist + k).toFixed(1)} ${Y(p.quantidade_prevista).toFixed(1)}`).join(" ");
+  // Faixa: sobe pelo limite superior e volta pelo inferior, partindo do último mês real.
+  const faixa =
+    previsoes.length > 0
+      ? inicio +
+      previsoes
+        .map((p, k) => `L${X(nHist + k).toFixed(1)} ${Y(p.intervalo_superior ?? p.quantidade_prevista).toFixed(1)}`)
+        .join(" ") +
+      " " +
+      [...previsoes]
+        .map((p, k) => ({ p, k }))
+        .reverse()
+        .map(({ p, k }) => `L${X(nHist + k).toFixed(1)} ${Y(p.intervalo_inferior ?? p.quantidade_prevista).toFixed(1)}`)
+        .join(" ") +
+      " Z"
+      : "";
   const xBase = X(nHist - 1);
 
-  const rotulos = Array.from({ length: n }, (_, i) => {
-    const deslocamento = i - (nHist - 1);
-    // Um rótulo por semana; o último dia só aparece se não colar no rótulo anterior.
-    const mostrar = deslocamento % 7 === 0 || (i === n - 1 && deslocamento % 7 >= 4);
-    return {
-      i,
-      texto: mostrar ? fmtDiaMes(somarDias(base, deslocamento)) : "",
-      cor: deslocamento > 0 ? "#2F8FD0" : deslocamento === 0 ? "#0A2540" : "#8494A6",
-    };
-  }).filter((r) => r.texto);
+  // Um ponto por mês, para a dica ao passar o mouse.
+  const pontos = [
+    ...historico.map((h) => ({ periodo: h.periodo, valor: h.quantidade, previsto: false, inferior: null, superior: null })),
+    ...previsoes.map((p) => ({
+      periodo: p.periodo,
+      valor: p.quantidade_prevista,
+      previsto: true,
+      inferior: p.intervalo_inferior,
+      superior: p.intervalo_superior,
+    })),
+  ];
+  const largura = n > 1 ? 840 / (n - 1) : 840; // área de captura do mouse de cada mês
+  const pct = (x: number) => `${(x / 840) * 100}%`;
+  const ponto = ativo != null ? pontos[ativo] : null;
+
+  // Com muitos meses, rótulo sim/não alternado; o 1º mês previsto sempre aparece.
+  const passo = n > 12 ? 2 : 1;
+  const rotulos = pontos
+    .map((p, i) => ({ i, periodo: p.periodo }))
+    .filter(({ i }) => i === nHist || (i - nHist) % passo === 0);
 
   return (
     <div className="mt-[18px] flex gap-2.5">
@@ -574,25 +574,93 @@ function Grafico({ historico, previsao, base }: { historico: number[]; previsao:
         <span>0</span>
       </div>
       <div className="flex min-w-0 flex-1 flex-col gap-1.5">
-        <svg viewBox="0 0 840 280" preserveAspectRatio="none" className="block h-[280px] w-full" aria-hidden="true">
-          <g stroke="#E4EBF2" strokeWidth="1">
-            <line x1="0" y1="20" x2="840" y2="20" vectorEffect="non-scaling-stroke" />
-            <line x1="0" y1="140" x2="840" y2="140" vectorEffect="non-scaling-stroke" />
-            <line x1="0" y1="260" x2="840" y2="260" vectorEffect="non-scaling-stroke" />
-          </g>
-          <rect x={xBase} y="0" width={840 - xBase} height="280" fill="#F4F9FD" />
-          <path d={caminhoHist} fill="none" stroke="#1F5FA0" strokeWidth="2.5" strokeLinejoin="round" vectorEffect="non-scaling-stroke" />
-          <path d={caminhoPrev} fill="none" stroke="#4AA8E0" strokeWidth="2.5" strokeDasharray="6 5" strokeLinejoin="round" vectorEffect="non-scaling-stroke" />
-          <line x1={xBase} y1="0" x2={xBase} y2="280" stroke="#9FB6CE" strokeWidth="1" strokeDasharray="3 3" vectorEffect="non-scaling-stroke" />
-        </svg>
+        <div className="relative h-[280px]" onMouseLeave={() => setAtivo(null)}>
+          <svg viewBox="0 0 840 280" preserveAspectRatio="none" className="block h-[280px] w-full" aria-hidden="true">
+            <g stroke="#E4EBF2" strokeWidth="1">
+              <line x1="0" y1="20" x2="840" y2="20" vectorEffect="non-scaling-stroke" />
+              <line x1="0" y1="140" x2="840" y2="140" vectorEffect="non-scaling-stroke" />
+              <line x1="0" y1="260" x2="840" y2="260" vectorEffect="non-scaling-stroke" />
+            </g>
+            {previsoes.length > 0 && (
+              <>
+                <rect x={xBase} y="0" width={840 - xBase} height="280" fill="#F4F9FD" />
+                <path d={faixa} fill="#4AA8E0" fillOpacity="0.18" stroke="none" />
+              </>
+            )}
+            <path d={caminhoHist} fill="none" stroke="#1F5FA0" strokeWidth="2.5" strokeLinejoin="round" vectorEffect="non-scaling-stroke" />
+            {previsoes.length > 0 && (
+              <>
+                <path d={caminhoPrev} fill="none" stroke="#4AA8E0" strokeWidth="2.5" strokeDasharray="6 5" strokeLinejoin="round" vectorEffect="non-scaling-stroke" />
+                <line x1={xBase} y1="0" x2={xBase} y2="280" stroke="#9FB6CE" strokeWidth="1" strokeDasharray="3 3" vectorEffect="non-scaling-stroke" />
+              </>
+            )}
+          </svg>
+
+          {/* Um marcador por mês. Fica em HTML (e não no SVG) porque o SVG é
+              esticado (preserveAspectRatio="none") e deformaria os círculos. */}
+          {pontos.map((p, i) => (
+            <div
+              key={`ponto-${p.periodo}`}
+              className="pointer-events-none absolute h-[9px] w-[9px] -translate-x-1/2 -translate-y-1/2 rounded-full border-2"
+              style={{
+                left: pct(X(i)),
+                top: Y(p.valor),
+                borderColor: p.previsto ? "#4AA8E0" : "#1F5FA0",
+                background: p.previsto ? "#fff" : "#1F5FA0",
+              }}
+            />
+          ))}
+
+          {/* Áreas de captura: uma por mês, centrada no ponto. */}
+          {pontos.map((p, i) => (
+            <div
+              key={p.periodo}
+              className="absolute inset-y-0 cursor-crosshair"
+              style={{ left: pct(X(i) - largura / 2), width: pct(largura) }}
+              onMouseEnter={() => setAtivo(i)}
+            />
+          ))}
+
+          {ponto && ativo != null && (
+            <>
+              <div
+                className="pointer-events-none absolute inset-y-0 w-px bg-[#9FB6CE]"
+                style={{ left: pct(X(ativo)) }}
+              />
+              <div
+                className="pointer-events-none absolute h-[13px] w-[13px] -translate-x-1/2 -translate-y-1/2 rounded-full border-2 border-white shadow"
+                style={{ left: pct(X(ativo)), top: Y(ponto.valor), background: ponto.previsto ? "#4AA8E0" : "#1F5FA0" }}
+              />
+              <div
+                className="pointer-events-none absolute top-2 z-10 min-w-[150px] rounded-lg bg-navy px-3 py-2 text-xs text-white shadow-lg"
+                style={
+                  ativo > n / 2
+                    ? { right: `calc(${100 - (X(ativo) / 840) * 100}% + 10px)` }
+                    : { left: `calc(${pct(X(ativo))} + 10px)` }
+                }
+              >
+                <div className="font-bold capitalize">{fmtMesAno(ponto.periodo)}</div>
+                <div className="mt-0.5 text-[#D6E7F6]">{ponto.previsto ? "Previsão" : "Consumo realizado"}</div>
+                <div className="text-[15px] font-extrabold">
+                  {fmtNumero(ponto.valor, 1)} <span className="text-xs font-semibold">{unidade}</span>
+                </div>
+                {ponto.previsto && ponto.inferior != null && ponto.superior != null && (
+                  <div className="mt-0.5 text-[11px] text-[#D6E7F6]">
+                    Faixa: {fmtNumero(ponto.inferior, 1)} a {fmtNumero(ponto.superior, 1)}
+                  </div>
+                )}
+              </div>
+            </>
+          )}
+        </div>
         <div className="relative h-4">
-          {rotulos.map((r) => (
+          {rotulos.map(({ i, periodo }) => (
             <span
-              key={r.i}
+              key={periodo}
               className="absolute -translate-x-1/2 whitespace-nowrap text-[10.5px]"
-              style={{ left: `${(X(r.i) / 840) * 100}%`, color: r.cor }}
+              style={{ left: pct(X(i)), color: i >= nHist ? "#2F8FD0" : "#8494A6" }}
             >
-              {r.texto}
+              {fmtMesAno(periodo)}
             </span>
           ))}
         </div>

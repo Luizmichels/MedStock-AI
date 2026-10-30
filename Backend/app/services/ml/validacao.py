@@ -35,6 +35,9 @@ def walk_forward(
 
     total_teste = n_dobras * horizonte
     if n <= total_teste:
+        # Série curta: o horizonte não pode passar de n - 1 (sobra ao menos um
+        # mês de treino) e as dobras diminuem até caber.
+        horizonte = max(min(horizonte, n - 1), 1)
         n_dobras = max((n - 1) // horizonte, 1)
         total_teste = n_dobras * horizonte
 

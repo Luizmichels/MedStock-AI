@@ -9,17 +9,19 @@ from dataclasses import dataclass, field
 from datetime import date
 
 import pandas as pd
+from dateutil.relativedelta import relativedelta
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from app.models.classificacao_abc import ClassificacaoABC
 from app.models.consumo_tratado import ConsumoTratado
 from app.models.itens import Item
-from app.services.ml.previsao_diaria import resumo_por_item
+from app.services.ml.predicao import resumo_mensal
+from app.services.ml.treinamento import HORIZONTE_MESES
 
 COLUNAS_PREVISOES = [
     "Código", "Descrição", "Unid.", "Curva ABC",
-    "Média diária", "Próx. 7 dias", "Próx. 15 dias", "Próx. 30 dias",
+    *[f"Mês {i}" for i in range(1, HORIZONTE_MESES + 1)], f"Total {HORIZONTE_MESES} meses",
 ]
 COLUNAS_CONSUMO = [
     "Código", "Descrição", "Unid.", "Grupo", "Curva ABC",
@@ -27,13 +29,27 @@ COLUNAS_CONSUMO = [
 ]
 COLUNAS_CONSUMO_MENSAL = ["Código", "Descrição", "Competência", "Quantidade", "Valor (R$)"]
 COLUNAS_CONSUMO_SETOR = ["Setor", "Quantidade", "Valor (R$)", "% do valor"]
+COLUNAS_PREVISAO_MENSAL = [
+    "Código", "Descrição", "Modelo", "Competência", "Previsão", "Mínimo", "Máximo",
+    "Erro médio (MAE)",
+]
 
 # Colunas numéricas e quantas casas mostrar (usado no PDF e no Excel).
 CASAS_DECIMAIS = {
-    "Média diária": 2, "Próx. 7 dias": 1, "Próx. 15 dias": 1, "Próx. 30 dias": 1,
+    **{f"Mês {i}": 1 for i in range(1, HORIZONTE_MESES + 1)}, f"Total {HORIZONTE_MESES} meses": 1,
     "Quantidade": 2, "Valor (R$)": 2, "% do valor": 2,
+    "Previsão": 1, "Mínimo": 1, "Máximo": 1, "Erro médio (MAE)": 1,
 }
 COLUNAS_MOEDA = {"Valor (R$)"}
+
+# Nome de exibição dos algoritmos do modelo mensal.
+ROTULOS_ALGORITMO = {
+    "sma": "Média móvel (SMA)",
+    "sarima": "ARIMA",
+    "holt_winters": "Holt-Winters",
+    "random_forest": "Random Forest",
+    "gradient_boosting": "Gradient Boosting",
+}
 
 
 @dataclass
@@ -91,38 +107,46 @@ _ORDEM_ABC = {"A": 0, "B": 1, "C": 2}
 
 
 def montar_relatorio_previsoes(db: Session, empresa_id: int) -> Relatorio:
-    """Uma linha por material com previsão diária: horizontes de 7, 15 e 30 dias.
+    """Uma linha por material com a previsão dos próximos meses do modelo ativo.
+    O Excel traz também o detalhe mês a mês, com o modelo escolhido e a faixa.
 
     Ordenado por importância: curva ABC e, dentro dela, valor consumido."""
-    resumo = resumo_por_item(db, empresa_id)
+    resumo = resumo_mensal(db, empresa_id)
+    itens_resumo = resumo["itens"]
+    ids = [r["item_id"] for r in itens_resumo]
     itens = {
         i.id: i
-        for i in db.query(Item).filter(
-            Item.empresa_id == empresa_id, Item.id.in_([r["item_id"] for r in resumo])
-        )
-    } if resumo else {}
+        for i in db.query(Item).filter(Item.empresa_id == empresa_id, Item.id.in_(ids))
+    } if ids else {}
     classes = _classes_abc(db, empresa_id)
     valores = _valor_por_item(db, empresa_id)
 
     def chave(r: dict):
-        return (_ORDEM_ABC.get(classes.get(r["item_id"], ""), 3), -valores.get(r["item_id"], 0.0))
+        iid = r["item_id"]
+        return (_ORDEM_ABC.get(classes.get(iid, ""), 3), -valores.get(iid, 0.0))
 
-    linhas = []
-    for r in sorted(resumo, key=chave):
+    linhas, detalhe = [], []
+    for r in sorted(itens_resumo, key=chave):
         item = itens.get(r["item_id"])
+        codigo = item.codigo_item if item else str(r["item_id"])
+        descricao = item.descricao_item if item else ""
+        meses = [p.quantidade_prevista for p in r["previsoes"]][:HORIZONTE_MESES]
+        meses += [None] * (HORIZONTE_MESES - len(meses))
         linhas.append([
-            item.codigo_item if item else str(r["item_id"]),
-            item.descricao_item if item else "",
+            codigo, descricao,
             (item.unidade_medida if item else None) or "—",
             classes.get(r["item_id"], "—"),
-            r["trinta_dias"] / 30,
-            r["sete_dias"],
-            r["quinze_dias"],
-            r["trinta_dias"],
+            *meses,
+            r["total"],
         ])
+        modelo = ROTULOS_ALGORITMO.get(r["algoritmo"], r["algoritmo"])
+        for p in r["previsoes"]:
+            detalhe.append([
+                codigo, descricao, modelo, _fmt_competencia(p.periodo),
+                p.quantidade_prevista, p.intervalo_inferior, p.intervalo_superior, r["mae"],
+            ])
     tabela = pd.DataFrame(linhas, columns=COLUNAS_PREVISOES)
 
-    base = max((r["base"] for r in resumo), default=None)
     contagem = tabela["Curva ABC"].value_counts().to_dict() if not tabela.empty else {}
     indicadores = [
         ("Materiais com previsão", fmt_numero(len(tabela))),
@@ -130,15 +154,28 @@ def montar_relatorio_previsoes(db: Session, empresa_id: int) -> Relatorio:
         ("Curva B", fmt_numero(contagem.get("B", 0))),
         ("Curva C", fmt_numero(contagem.get("C", 0))),
     ]
-    referencia = (
-        f"Previsão diária a partir de {_fmt_data(base)} (último dia com dados de consumo)"
-        if base else "Ainda não há previsões diárias geradas."
+    if resumo["treinado_em"] is not None:
+        indicadores.append(("Modelo treinado em", _fmt_data(resumo["treinado_em"])))
+
+    referencia_mes = resumo["referencia"]
+    if itens_resumo and referencia_mes is not None:
+        rotulos = " · ".join(
+            f"Mês {i} = {_fmt_competencia(referencia_mes + relativedelta(months=i))}"
+            for i in range(1, HORIZONTE_MESES + 1)
+        )
+        referencia = f"{rotulos} (último mês com dados: {_fmt_competencia(referencia_mes)})"
+    else:
+        referencia = "Ainda não há previsões geradas. Treine os modelos na tela de Previsões."
+
+    abas_extras = (
+        {"Detalhe mensal": pd.DataFrame(detalhe, columns=COLUNAS_PREVISAO_MENSAL)} if detalhe else {}
     )
     return Relatorio(
         titulo="Relatório de Previsões",
         tabela=tabela,
         indicadores=indicadores,
         referencia=referencia,
+        abas_extras=abas_extras,
     )
 
 

@@ -13,7 +13,7 @@ from app.schemas.dashboard_schemas import (
     ItemRanking,
     OpcoesFiltroResponse,
     PontoMensal,
-    PrevisaoProximosDias,
+    PrevisaoProximoMes,
     ResumoResponse,
 )
 from app.services import abc_service, dashboard_service
@@ -93,20 +93,19 @@ def cobertura_previsao(
     db: Session = Depends(get_db),
     current_user: Usuario = Depends(get_current_user),
 ):
-    """Parcela do consumo (no filtro) de itens com previsão diária gerada."""
+    """Parcela do consumo (no filtro) de itens com previsão do modelo ativo."""
     return dashboard_service.cobertura_previsao(db, current_user.empresa_id, filtros)
 
 
-@router.get("/previsao-proximos-dias", response_model=PrevisaoProximosDias)
-def previsao_proximos_dias(
-    dias: int = Query(30, ge=1, le=30),
+@router.get("/previsao-proximo-mes", response_model=PrevisaoProximoMes)
+def previsao_proximo_mes(
     filtros: FiltrosDashboard = Depends(filtros_dashboard),
     db: Session = Depends(get_db),
     current_user: Usuario = Depends(get_current_user),
 ):
-    """Previsão diária somada (quantidade e valor estimado) dos materiais do filtro.
-    Competência e setor não se aplicam: a previsão é por material."""
-    return dashboard_service.previsao_proximos_dias(db, current_user.empresa_id, filtros, dias=dias)
+    """Previsão do próximo mês (quantidade e valor estimado) dos materiais do
+    filtro. Competência e setor não se aplicam: a previsão é por material."""
+    return dashboard_service.previsao_proximo_mes(db, current_user.empresa_id, filtros)
 
 
 @router.get("/classificacao-abc", response_model=list[DistribuicaoABC])

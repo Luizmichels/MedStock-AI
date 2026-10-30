@@ -19,6 +19,10 @@ from app.services.ml.validacao import (
     selecionar_melhor,
 )
 
+# Meses à frente previstos e usados na validação: o erro medido no treino é o
+# das previsões de 1 a 3 meses, o mesmo horizonte exibido ao usuário.
+HORIZONTE_MESES = 3
+
 
 def _serie_mensal_continua(por_periodo: dict[date, float]) -> np.ndarray:
     """Reindexa a série num intervalo mensal contínuo (do 1º ao último mês),
@@ -106,7 +110,7 @@ def selecionar_algoritmo_por_item(
     algoritmos=ALGORITMOS,
     fabrica: Callable[[str], Estimador] | None = None,
     n_dobras: int = 3,
-    horizonte: int = 1,
+    horizonte: int = HORIZONTE_MESES,
 ) -> dict[int, ResultadoAvaliacao]:
     """Para CADA item, avalia por walk-forward apenas os algoritmos com histórico
     suficiente e escolhe o de menor MAE. A decisão é por item, itens diferentes podem
@@ -154,7 +158,7 @@ def treinar_empresa(
     algoritmos=ALGORITMOS,
     fabrica: Callable[[str], Estimador] | None = None,
     n_dobras: int = 3,
-    horizonte: int = 1,
+    horizonte: int = HORIZONTE_MESES,
 ) -> ModeloTreinado:
     """Seleciona o melhor algoritmo POR ITEM (menor MAE) sobre todos os itens
     elegíveis e persiste como um único modelo ativo da empresa; a escolha de cada

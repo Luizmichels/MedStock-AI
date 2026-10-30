@@ -582,9 +582,39 @@ export interface StatusTreinoResponse {
   ultimo_modelo: ModeloTreinadoResponse | null;
 }
 
+export interface PontoHistoricoMensal {
+  periodo: string; // 1º dia do mês, "AAAA-MM-DD"
+  quantidade: number;
+}
+
+export interface PrevisaoMensalDetalhe {
+  item_id: number;
+  algoritmo: string | null; // escolhido para o item no treino; null sem modelo treinado
+  mae: number | null;
+  rmse: number | null;
+  mape: number | null;
+  historico: PontoHistoricoMensal[];
+  previsoes: PrevisaoResponse[];
+}
+
+export interface ResumoPrevisaoItem {
+  item_id: number;
+  algoritmo: string; // escolhido para o item no treino
+  mae: number | null;
+  mape: number | null;
+  previsoes: PrevisaoResponse[]; // os meses do horizonte, em ordem
+  total: number;
+}
+
+export interface ResumoPrevisoesResponse {
+  referencia: string | null; // último mês com dados; a previsão começa no seguinte
+  treinado_em: string | null;
+  itens: ResumoPrevisaoItem[];
+}
+
 export interface ResumoDiarioItem {
   item_id: number;
-  metodo: string;
+  metodo: string; // "croston_sba" | "media_movel_sazonal"
   base: string;
   proximo_dia: number;
   sete_dias: number;
@@ -653,6 +683,16 @@ export function ativarModelo(modeloId: number): Promise<ModeloTreinadoResponse> 
 // GET - /previsoes/  (previsões mensais, paginado)
 export function listarPrevisoes(filtros: FiltrosPrevisoes = {}): Promise<Pagina<PrevisaoResponse>> {
   return apiFetch<Pagina<PrevisaoResponse>>(`/previsoes/${montarQuery(filtros)}`);
+}
+
+// GET - /previsoes/resumo  (previsões do modelo ativo agrupadas por item)
+export function resumoPrevisoes(): Promise<ResumoPrevisoesResponse> {
+  return apiFetch<ResumoPrevisoesResponse>("/previsoes/resumo");
+}
+
+// GET - /previsoes/mensal/{item_id}  (histórico + próximos meses do modelo ativo; 404 sem consumo)
+export function detalheMensal(itemId: number): Promise<PrevisaoMensalDetalhe> {
+  return apiFetch<PrevisaoMensalDetalhe>(`/previsoes/mensal/${itemId}`);
 }
 
 // GET - /previsoes/itens-omitidos
@@ -800,18 +840,17 @@ export function coberturaPrevisao(filtros: FiltrosDashboard = {}): Promise<Cober
   return apiFetch<CoberturaPrevisao>(`/dashboard/cobertura-previsao${montarQuery(filtros)}`);
 }
 
-/** Previsão diária somada dos próximos `dias` (a previsão é por material: setor e competência não se aplicam). */
-export interface PrevisaoProximosDias {
-  dias: number;
+/** Previsão do próximo mês pelo modelo mensal ativo (a previsão é por material: setor e competência não se aplicam). */
+export interface PrevisaoProximoMes {
+  mes: string | null; // 1º dia do mês previsto; null sem modelo treinado
   quantidade_prevista: number;
   valor_estimado: number; // quantidade prevista x preço médio histórico de cada material
   itens_com_previsao: number;
-  base: string | null; // último dia com dados; a previsão começa no dia seguinte
 }
 
-// GET - /dashboard/previsao-proximos-dias  (dias: 1 a 30)
-export function previsaoProximosDias(filtros: FiltrosDashboard = {}, dias = 30): Promise<PrevisaoProximosDias> {
-  return apiFetch<PrevisaoProximosDias>(`/dashboard/previsao-proximos-dias${montarQuery({ dias, ...filtros })}`);
+// GET - /dashboard/previsao-proximo-mes
+export function previsaoProximoMes(filtros: FiltrosDashboard = {}): Promise<PrevisaoProximoMes> {
+  return apiFetch<PrevisaoProximoMes>(`/dashboard/previsao-proximo-mes${montarQuery(filtros)}`);
 }
 
 // GET - /dashboard/classificacao-abc  (nº de itens distintos e valor por classe)

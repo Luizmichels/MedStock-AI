@@ -6,7 +6,8 @@ from app.models.classificacao_abc import ClassificacaoABC
 from app.models.consumo_tratado import ConsumoTratado
 from app.models.importacoes import Importacao
 from app.models.itens import Item
-from app.models.previsao_diaria import PrevisaoDiaria
+from app.models.modelo_treinado import ModeloTreinado
+from app.models.previsoes import Previsao
 from app.services import dashboard_service as ds
 
 
@@ -78,11 +79,19 @@ def test_kpis_conta_classe_a(db_session, empresa):
     assert kpis.itens_classe_a == 1
 
 
-def _previsao_diaria(db, empresa, item) -> None:
-    db.add(PrevisaoDiaria(
-        empresa_id=empresa.id, item_id=item.id, data=date(2024, 7, 1),
-        quantidade_prevista=1.0, metodo="croston_sba",
-    ))
+def _modelo_ativo(db, empresa) -> ModeloTreinado:
+    modelo = ModeloTreinado(empresa_id=empresa.id, algoritmo="melhor_por_item", ativo=True)
+    db.add(modelo)
+    db.flush()
+    return modelo
+
+
+def _previsoes(db, empresa, modelo, item, valores, inicio=date(2024, 7, 1)) -> None:
+    for i, v in enumerate(valores):
+        db.add(Previsao(
+            empresa_id=empresa.id, modelo_id=modelo.id, item_id=item.id,
+            periodo=date(inicio.year, inicio.month + i, 1), quantidade_prevista=v,
+        ))
 
 
 def test_cobertura_previsao_pondera_pelo_valor(db_session, empresa):
@@ -90,7 +99,7 @@ def test_cobertura_previsao_pondera_pelo_valor(db_session, empresa):
     barato = _item(db_session, empresa, "BARATO")
     _tratado(db_session, empresa, caro, date(2024, 1, 1), 10, 900, setor="UTI")
     _tratado(db_session, empresa, barato, date(2024, 1, 1), 10, 100, setor="Farmácia")
-    _previsao_diaria(db_session, empresa, caro)
+    _previsoes(db_session, empresa, _modelo_ativo(db_session, empresa), caro, [1.0])
     db_session.commit()
 
     cobertura = ds.cobertura_previsao(db_session, empresa.id)
@@ -299,35 +308,31 @@ def test_filtros_aceitam_varios_valores(db_session, empresa):
     assert total(ds.FiltrosDashboard(grupos=["Medicamentos", "Materiais"], setores=["B", "C"])) == 20
 
 
-def _previsao_dias(db, empresa, item, valores) -> None:
-    for i, v in enumerate(valores):
-        db.add(PrevisaoDiaria(
-            empresa_id=empresa.id, item_id=item.id, data=date(2024, 7, 1 + i),
-            quantidade_prevista=v, metodo="croston_sba",
-        ))
-
-
-def test_previsao_proximos_dias_soma_quantidade_e_estima_valor(db_session, empresa):
+def test_previsao_proximo_mes_soma_quantidade_e_estima_valor(db_session, empresa):
     remedio = _item_material(db_session, empresa, "R1", "Medicamentos")
     luva = _item_material(db_session, empresa, "L1", "Materiais")
     _tratado(db_session, empresa, remedio, date(2024, 6, 1), 10, 50)  # R$ 5 por unidade
     _tratado(db_session, empresa, luva, date(2024, 6, 1), 4, 4)  # R$ 1 por unidade
-    _previsao_dias(db_session, empresa, remedio, [2.0] * 31)
-    _previsao_dias(db_session, empresa, luva, [1.0] * 10)
+    modelo = _modelo_ativo(db_session, empresa)
+    _previsoes(db_session, empresa, modelo, remedio, [60.0, 70.0, 80.0])
+    _previsoes(db_session, empresa, modelo, luva, [10.0, 12.0, 14.0])
+    # Previsões de um modelo inativo não contam.
+    antigo = ModeloTreinado(empresa_id=empresa.id, algoritmo="melhor_por_item", ativo=False)
+    db_session.add(antigo)
+    db_session.flush()
+    _previsoes(db_session, empresa, antigo, luva, [999.0])
     db_session.commit()
 
-    tudo = ds.previsao_proximos_dias(db_session, empresa.id)
-    assert tudo.quantidade_prevista == 70.0  # 30 dias x 2 + 10 x 1 (o 31º dia fica de fora)
+    tudo = ds.previsao_proximo_mes(db_session, empresa.id)
+    assert tudo.mes == date(2024, 7, 1)
+    assert tudo.quantidade_prevista == 70.0  # só julho: 60 + 10
     assert tudo.valor_estimado == 310.0  # 60 x 5 + 10 x 1
     assert tudo.itens_com_previsao == 2
-    assert tudo.base == date(2024, 6, 30)
 
-    so_remedio = ds.previsao_proximos_dias(db_session, empresa.id, ds.FiltrosDashboard(grupos=["Medicamentos"]))
+    so_remedio = ds.previsao_proximo_mes(db_session, empresa.id, ds.FiltrosDashboard(grupos=["Medicamentos"]))
     assert (so_remedio.quantidade_prevista, so_remedio.itens_com_previsao) == (60.0, 1)
-    sete = ds.previsao_proximos_dias(db_session, empresa.id, dias=7)
-    assert sete.quantidade_prevista == 21.0
 
 
-def test_previsao_proximos_dias_sem_previsao(db_session, empresa):
-    vazio = ds.previsao_proximos_dias(db_session, empresa.id)
-    assert (vazio.quantidade_prevista, vazio.itens_com_previsao, vazio.base) == (0.0, 0, None)
+def test_previsao_proximo_mes_sem_modelo(db_session, empresa):
+    vazio = ds.previsao_proximo_mes(db_session, empresa.id)
+    assert (vazio.quantidade_prevista, vazio.itens_com_previsao, vazio.mes) == (0.0, 0, None)
