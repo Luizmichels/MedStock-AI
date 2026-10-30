@@ -1,0 +1,80 @@
+# Produção (EC2): banco, API, frontend e proxy HTTPS.
+#
+# Uso, na raiz do repositório e com o .env de produção criado a partir de
+# deploy/env.producao.example:
+#   docker compose -f docker-compose.prod.yml up -d --build
+#
+# Só o proxy (Caddy) publica portas (80/443). Banco, API e frontend ficam na
+# rede interna do Compose, sem acesso direto pela internet.
+
+services:
+  db:
+    image: postgres:16
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?defina POSTGRES_PASSWORD no .env}
+      POSTGRES_DB: medstock
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: [ "CMD-SHELL", "pg_isready -U postgres" ]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  api:
+    build: ./Backend
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      AMBIENTE: producao
+      DATABASE_URL: postgresql+psycopg://postgres:${POSTGRES_PASSWORD}@db:5432/medstock
+      FRONTEND_URL: https://app.${DOMINIO:?defina DOMINIO no .env}
+      # A API só é alcançada pelo Caddy; confiar no X-Forwarded-For dele faz o
+      # rate limit enxergar o IP real do usuário em vez do IP do proxy.
+      FORWARDED_ALLOW_IPS: "*"
+    healthcheck:
+      test: [ "CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health', timeout=4)" ]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 40s
+    depends_on:
+      db:
+        condition: service_healthy
+
+  frontend:
+    build:
+      context: ./Frontend
+      args:
+        # Embutida no build do Next (variável NEXT_PUBLIC_*).
+        NEXT_PUBLIC_API_URL: https://api.${DOMINIO}
+    restart: unless-stopped
+    depends_on:
+      - api
+
+  proxy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    environment:
+      DOMINIO: ${DOMINIO}
+      EMAIL_CERTIFICADO: ${EMAIL_CERTIFICADO:?defina EMAIL_CERTIFICADO no .env}
+      LIMITE_UPLOAD_PROXY: ${LIMITE_UPLOAD_PROXY:-60MB}
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"
+    volumes:
+      - ./deploy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      - api
+      - frontend
+
+volumes:
+  postgres_data:
+  caddy_data:
+  caddy_config:

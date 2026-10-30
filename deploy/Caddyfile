@@ -1,0 +1,40 @@
+# Proxy reverso de produção com HTTPS automático (RNF11).
+# O Caddy emite e renova os certificados (Let's Encrypt) para cada endereço
+# abaixo, desde que o DNS de cada um aponte para o IP da instância.
+
+{
+	email {$EMAIL_CERTIFICADO}
+}
+
+(seguranca) {
+	encode zstd gzip
+	header {
+		Strict-Transport-Security "max-age=31536000; includeSubDomains"
+		X-Content-Type-Options "nosniff"
+		X-Frame-Options "DENY"
+		Referrer-Policy "strict-origin-when-cross-origin"
+		-Server
+	}
+}
+
+# Frontend (Next.js)
+app.{$DOMINIO} {
+	import seguranca
+	reverse_proxy frontend:3000
+}
+
+# API (FastAPI)
+api.{$DOMINIO} {
+	import seguranca
+	# Barra uploads muito acima do limite da API (UPLOAD_MAX_MB) antes de
+	# chegarem ao container.
+	request_body {
+		max_size {$LIMITE_UPLOAD_PROXY}
+	}
+	reverse_proxy api:8000
+}
+
+# Domínio raiz e www levam para o frontend.
+{$DOMINIO}, www.{$DOMINIO} {
+	redir https://app.{$DOMINIO}{uri} permanent
+}

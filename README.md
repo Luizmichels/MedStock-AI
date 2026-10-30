@@ -71,6 +71,11 @@ Documentação interativa (Swagger): http://localhost:8000/docs
 
 > **Atenção**: como o projeto ainda não usa Alembic, o schema do banco é criado via `Base.metadata.create_all()` no startup — isso só cria tabelas que não existem, nunca altera tabelas já existentes. Se você mudar um modelo (nova coluna, etc.), é necessário resetar o banco (`docker compose down -v` seguido de `docker compose up -d`) para o schema novo ser aplicado.
 
+## Produção (AWS EC2)
+
+O deploy usa `docker-compose.prod.yml` (banco, API, frontend e proxy Caddy com
+HTTPS) e o `.env` de produção criado a partir de `deploy/env.producao.example`.
+
 ## Rodando sem Docker
 
 ```bash
