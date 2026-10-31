@@ -89,3 +89,60 @@ def test_desativar_usuario(client, db_session, empresa, usuario_admin):
     assert resposta.status_code == 200
     db_session.refresh(alvo)
     assert alvo.ativo is False
+
+
+# --------------------------------------------------------------------------- #
+# Perfil do próprio usuário (/usuarios/me)
+# --------------------------------------------------------------------------- #
+def _auth_de(usuario) -> dict:
+    return {"Authorization": f"Bearer {token_para(usuario)}"}
+
+
+def test_usuario_altera_o_proprio_nome(client, db_session, usuario_comum):
+    resposta = client.patch("/usuarios/me", headers=_auth_de(usuario_comum), json={"nome": "  Novo Nome  "})
+    assert resposta.status_code == 200
+    assert resposta.json()["nome"] == "Novo Nome"
+
+
+def test_trocar_email_exige_senha_atual(client, db_session, usuario_comum):
+    novo = "novo@hospitalteste.com"
+    sem_senha = client.patch("/usuarios/me", headers=_auth_de(usuario_comum), json={"email": novo})
+    assert sem_senha.status_code == 400
+    errada = client.patch(
+        "/usuarios/me", headers=_auth_de(usuario_comum), json={"email": novo, "senha_atual": "errada"}
+    )
+    assert errada.status_code == 400
+    certa = client.patch(
+        "/usuarios/me", headers=_auth_de(usuario_comum), json={"email": novo, "senha_atual": "Senha123!"}
+    )
+    assert certa.status_code == 200
+    assert certa.json()["email"] == novo
+
+
+def test_trocar_email_para_um_ja_usado_da_400(client, db_session, empresa, usuario_comum, usuario_admin):
+    resposta = client.patch(
+        "/usuarios/me", headers=_auth_de(usuario_comum),
+        json={"email": usuario_admin.email, "senha_atual": "Senha123!"},
+    )
+    assert resposta.status_code == 400
+
+
+def test_trocar_a_propria_senha(client, db_session, usuario_comum):
+    def trocar(atual, nova):
+        return client.post(
+            "/usuarios/me/senha", headers=_auth_de(usuario_comum),
+            json={"senha_atual": atual, "nova_senha": nova},
+        )
+
+    assert trocar("errada", "NovaSenha456!").status_code == 400
+    assert trocar("Senha123!", "curta").status_code == 422
+    assert trocar("Senha123!", "Senha123!").status_code == 400
+    assert trocar("Senha123!", "NovaSenha456!").status_code == 200
+    login = client.post("/auth/login", json={"email": usuario_comum.email, "senha": "NovaSenha456!"})
+    assert login.status_code == 200
+
+
+def test_super_admin_nao_aparece_na_lista_de_usuarios(client, db_session, empresa, usuario_admin):
+    criar_usuario(db_session, empresa, perfil="super_admin")
+    resposta = client.get("/usuarios/listar/usuarios", headers=_auth_de(usuario_admin))
+    assert "super_admin" not in {u["perfil"] for u in resposta.json()}

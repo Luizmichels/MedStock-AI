@@ -6,6 +6,8 @@ from app.models.classificacao_abc import ClassificacaoABC
 from app.models.consumo_tratado import ConsumoTratado
 from app.models.importacoes import Importacao
 from app.models.itens import Item
+from app.models.modelo_treinado import ModeloTreinado
+from app.models.previsoes import Previsao
 from app.services import dashboard_service as ds
 
 
@@ -16,10 +18,10 @@ def _item(db, empresa, codigo, *, ativo=True) -> Item:
     return item
 
 
-def _tratado(db, empresa, item, periodo, qtd, valor, local="Central") -> None:
+def _tratado(db, empresa, item, periodo, qtd, valor, setor="Central") -> None:
     db.add(ConsumoTratado(
         empresa_id=empresa.id, item_id=item.id, periodo=periodo,
-        quantidade_total=qtd, valor_total=valor, local_estoque=local,
+        quantidade_total=qtd, valor_total=valor, setor=setor,
     ))
 
 
@@ -77,15 +79,43 @@ def test_kpis_conta_classe_a(db_session, empresa):
     assert kpis.itens_classe_a == 1
 
 
-def test_kpis_cobertura_previsao(db_session, empresa):
-    elegivel = _item(db_session, empresa, "LONGO")
-    for mes in range(1, 7):
-        _tratado(db_session, empresa, elegivel, date(2024, mes, 1), 10, 100)
-    curto = _item(db_session, empresa, "CURTO")
-    _tratado(db_session, empresa, curto, date(2024, 1, 1), 10, 100)
+def _modelo_ativo(db, empresa) -> ModeloTreinado:
+    modelo = ModeloTreinado(empresa_id=empresa.id, algoritmo="melhor_por_item", ativo=True)
+    db.add(modelo)
+    db.flush()
+    return modelo
+
+
+def _previsoes(db, empresa, modelo, item, valores, inicio=date(2024, 7, 1)) -> None:
+    for i, v in enumerate(valores):
+        db.add(Previsao(
+            empresa_id=empresa.id, modelo_id=modelo.id, item_id=item.id,
+            periodo=date(inicio.year, inicio.month + i, 1), quantidade_prevista=v,
+        ))
+
+
+def test_cobertura_previsao_pondera_pelo_valor(db_session, empresa):
+    caro = _item(db_session, empresa, "CARO")
+    barato = _item(db_session, empresa, "BARATO")
+    _tratado(db_session, empresa, caro, date(2024, 1, 1), 10, 900, setor="UTI")
+    _tratado(db_session, empresa, barato, date(2024, 1, 1), 10, 100, setor="Farmácia")
+    _previsoes(db_session, empresa, _modelo_ativo(db_session, empresa), caro, [1.0])
     db_session.commit()
-    kpis = ds.calcular_kpis(db_session, empresa.id)
-    assert kpis.cobertura_previsao == 50.0
+
+    cobertura = ds.cobertura_previsao(db_session, empresa.id)
+    assert (cobertura.itens_consumidos, cobertura.itens_com_previsao) == (2, 1)
+    assert cobertura.percentual_valor == 90.0
+    assert cobertura.percentual_itens == 50.0
+    assert ds.calcular_kpis(db_session, empresa.id).cobertura_previsao == 90.0
+
+    # Respeita os filtros: no setor Farmácia só há o item sem previsão.
+    so_farmacia = ds.cobertura_previsao(db_session, empresa.id, ds.FiltrosDashboard(setores=["Farmácia"]))
+    assert so_farmacia.percentual_valor == 0.0
+
+
+def test_cobertura_previsao_sem_consumo(db_session, empresa):
+    cobertura = ds.cobertura_previsao(db_session, empresa.id)
+    assert cobertura.percentual_valor == 0.0 and cobertura.itens_consumidos == 0
 
 
 def test_kpis_isolados_por_empresa(db_session, empresa, empresa_secundaria):
@@ -110,12 +140,12 @@ def test_consumo_mensal_sem_dados_retorna_vazio(db_session, empresa):
     assert ds.consumo_mensal(db_session, empresa.id) == []
 
 
-def test_consumo_por_local_agrega(db_session, empresa):
+def test_consumo_por_setor_agrega(db_session, empresa):
     item = _item(db_session, empresa, "A")
-    _tratado(db_session, empresa, item, date(2024, 1, 1), 10, 100, local="Central")
-    _tratado(db_session, empresa, item, date(2024, 2, 1), 5, 50, local="Farmácia")
+    _tratado(db_session, empresa, item, date(2024, 1, 1), 10, 100, setor="Central")
+    _tratado(db_session, empresa, item, date(2024, 2, 1), 5, 50, setor="Farmácia")
     db_session.commit()
-    locais = {c.local_estoque for c in ds.consumo_por_local(db_session, empresa.id)}
+    locais = {c.setor for c in ds.consumo_por_setor(db_session, empresa.id)}
     assert locais == {"Central", "Farmácia"}
 
 
@@ -151,3 +181,158 @@ def test_ultima_importacao_retorna_mais_recente(db_session, empresa, usuario_adm
     _importacao(db_session, empresa, usuario_admin)
     db_session.commit()
     assert ds.ultima_importacao(db_session, empresa.id) is not None
+
+
+# --------------------------------------------------------------------------- #
+# Filtros (competência, material, grupo/subgrupo/classe, setor)
+# --------------------------------------------------------------------------- #
+def _item_material(db, empresa, codigo, grupo, subgrupo=None, classe=None) -> Item:
+    item = Item(
+        empresa_id=empresa.id, codigo_item=codigo, descricao_item=f"Item {codigo}",
+        grupo_material=grupo, subgrupo_material=subgrupo, classe_material=classe,
+    )
+    db.add(item)
+    db.flush()
+    return item
+
+
+def test_consumo_mensal_filtra_por_setor_e_grupo(db_session, empresa):
+    med = _item_material(db_session, empresa, "MED", "Medicamentos")
+    mat = _item_material(db_session, empresa, "MAT", "Materiais")
+    _tratado(db_session, empresa, med, date(2024, 1, 1), 10, 100, setor="UTI")
+    _tratado(db_session, empresa, med, date(2024, 1, 1), 5, 50, setor="Farmácia")
+    _tratado(db_session, empresa, mat, date(2024, 1, 1), 7, 70, setor="UTI")
+    db_session.commit()
+
+    por_setor = ds.consumo_mensal(db_session, empresa.id, filtros=ds.FiltrosDashboard(setores=["UTI"]))
+    assert por_setor[-1].valor_total == 170
+
+    por_grupo = ds.consumo_mensal(
+        db_session, empresa.id, filtros=ds.FiltrosDashboard(grupos=["Medicamentos"])
+    )
+    assert por_grupo[-1].valor_total == 150
+
+    combinado = ds.consumo_mensal(
+        db_session, empresa.id,
+        filtros=ds.FiltrosDashboard(grupos=["Medicamentos"], setores=["UTI"]),
+    )
+    assert combinado[-1].valor_total == 100
+
+
+def test_consumo_mensal_competencia_gera_intervalo_continuo(db_session, empresa):
+    item = _item(db_session, empresa, "X")
+    _tratado(db_session, empresa, item, date(2024, 2, 1), 10, 100)
+    db_session.commit()
+
+    pontos = ds.consumo_mensal(
+        db_session, empresa.id,
+        filtros=ds.FiltrosDashboard(data_inicio=date(2024, 1, 1), data_fim=date(2024, 4, 1)),
+    )
+    assert [p.periodo for p in pontos] == [
+        date(2024, 1, 1), date(2024, 2, 1), date(2024, 3, 1), date(2024, 4, 1),
+    ]
+    assert [p.valor_total for p in pontos] == [0, 100, 0, 0]
+
+
+def test_distribuicao_abc_conta_item_uma_vez_mesmo_com_varios_meses(db_session, empresa):
+    item = _item(db_session, empresa, "A1")
+    _classe(db_session, empresa, item, "A")
+    for mes in (1, 2, 3):
+        _tratado(db_session, empresa, item, date(2024, mes, 1), 10, 100)
+    db_session.commit()
+
+    dist = {d.classe: d for d in ds.distribuicao_abc(db_session, empresa.id)}
+    assert dist["A"].quantidade_itens == 1  # antes saía 3 (uma linha por mês)
+    assert dist["A"].valor_total == 300
+
+
+def test_distribuicao_abc_com_filtro_considera_so_itens_do_filtro(db_session, empresa):
+    uti = _item(db_session, empresa, "U")
+    farm = _item(db_session, empresa, "F")
+    _classe(db_session, empresa, uti, "A")
+    _classe(db_session, empresa, farm, "A")
+    _tratado(db_session, empresa, uti, date(2024, 1, 1), 10, 100, setor="UTI")
+    _tratado(db_session, empresa, farm, date(2024, 1, 1), 10, 40, setor="Farmácia")
+    db_session.commit()
+
+    dist = ds.distribuicao_abc(db_session, empresa.id, ds.FiltrosDashboard(setores=["UTI"]))
+    assert [(d.classe, d.quantidade_itens, d.valor_total) for d in dist] == [("A", 1, 100)]
+
+
+def test_consumo_por_setor_respeita_filtro_de_material(db_session, empresa):
+    a = _item(db_session, empresa, "A")
+    b = _item(db_session, empresa, "B")
+    _tratado(db_session, empresa, a, date(2024, 1, 1), 1, 10, setor="UTI")
+    _tratado(db_session, empresa, b, date(2024, 1, 1), 1, 20, setor="Farmácia")
+    db_session.commit()
+
+    setores = ds.consumo_por_setor(db_session, empresa.id, ds.FiltrosDashboard(item_ids=[a.id]))
+    assert [(s.setor, s.valor_total) for s in setores] == [("UTI", 10)]
+
+
+def test_opcoes_filtro_lista_hierarquia_setores_e_periodo(db_session, empresa):
+    item = _item_material(db_session, empresa, "M1", "Medicamentos", "Analgésicos", "Injetáveis")
+    _item(db_session, empresa, "SEM")  # sem atributos: não entra na hierarquia
+    _tratado(db_session, empresa, item, date(2024, 1, 1), 1, 10, setor="UTI")
+    _tratado(db_session, empresa, item, date(2024, 3, 1), 1, 10, setor="Farmácia")
+    db_session.commit()
+
+    opcoes = ds.opcoes_filtro(db_session, empresa.id)
+    assert [(h.grupo_material, h.subgrupo_material, h.classe_material) for h in opcoes.hierarquia] == [
+        ("Medicamentos", "Analgésicos", "Injetáveis"),
+    ]
+    assert opcoes.setores == ["Farmácia", "UTI"]
+    assert opcoes.periodo_inicio == date(2024, 1, 1)
+    assert opcoes.periodo_fim == date(2024, 3, 1)
+    # Todos os materiais (inclusive sem atributos), com os atributos para a cascata.
+    assert [(m.codigo_item, m.grupo_material, m.classe_material) for m in opcoes.materiais] == [
+        ("M1", "Medicamentos", "Injetáveis"),
+        ("SEM", None, None),
+    ]
+
+
+def test_filtros_aceitam_varios_valores(db_session, empresa):
+    a = _item_material(db_session, empresa, "A", "Medicamentos")
+    b = _item_material(db_session, empresa, "B", "Materiais")
+    c = _item_material(db_session, empresa, "C", "Nutrição")
+    for item, valor in ((a, 10), (b, 20), (c, 40)):
+        _tratado(db_session, empresa, item, date(2024, 1, 1), 1, valor, setor=item.codigo_item)
+    db_session.commit()
+
+    def total(filtros):
+        return sum(p.valor_total for p in ds.consumo_mensal(db_session, empresa.id, filtros=filtros))
+
+    assert total(ds.FiltrosDashboard(grupos=["Medicamentos", "Materiais"])) == 30
+    assert total(ds.FiltrosDashboard(setores=["A", "C"])) == 50
+    assert total(ds.FiltrosDashboard(item_ids=[b.id, c.id])) == 60
+    assert total(ds.FiltrosDashboard(grupos=["Medicamentos", "Materiais"], setores=["B", "C"])) == 20
+
+
+def test_previsao_proximo_mes_soma_quantidade_e_estima_valor(db_session, empresa):
+    remedio = _item_material(db_session, empresa, "R1", "Medicamentos")
+    luva = _item_material(db_session, empresa, "L1", "Materiais")
+    _tratado(db_session, empresa, remedio, date(2024, 6, 1), 10, 50)  # R$ 5 por unidade
+    _tratado(db_session, empresa, luva, date(2024, 6, 1), 4, 4)  # R$ 1 por unidade
+    modelo = _modelo_ativo(db_session, empresa)
+    _previsoes(db_session, empresa, modelo, remedio, [60.0, 70.0, 80.0])
+    _previsoes(db_session, empresa, modelo, luva, [10.0, 12.0, 14.0])
+    # Previsões de um modelo inativo não contam.
+    antigo = ModeloTreinado(empresa_id=empresa.id, algoritmo="melhor_por_item", ativo=False)
+    db_session.add(antigo)
+    db_session.flush()
+    _previsoes(db_session, empresa, antigo, luva, [999.0])
+    db_session.commit()
+
+    tudo = ds.previsao_proximo_mes(db_session, empresa.id)
+    assert tudo.mes == date(2024, 7, 1)
+    assert tudo.quantidade_prevista == 70.0  # só julho: 60 + 10
+    assert tudo.valor_estimado == 310.0  # 60 x 5 + 10 x 1
+    assert tudo.itens_com_previsao == 2
+
+    so_remedio = ds.previsao_proximo_mes(db_session, empresa.id, ds.FiltrosDashboard(grupos=["Medicamentos"]))
+    assert (so_remedio.quantidade_prevista, so_remedio.itens_com_previsao) == (60.0, 1)
+
+
+def test_previsao_proximo_mes_sem_modelo(db_session, empresa):
+    vazio = ds.previsao_proximo_mes(db_session, empresa.id)
+    assert (vazio.quantidade_prevista, vazio.itens_com_previsao, vazio.mes) == (0.0, 0, None)

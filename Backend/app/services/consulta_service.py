@@ -30,6 +30,9 @@ def listar_itens(
     *,
     busca: str | None = None,
     classe_abc: str | None = None,
+    grupo_material: str | None = None,
+    subgrupo_material: str | None = None,
+    classe_material: str | None = None,
     pagina: int = 1,
     tamanho: int = 50,
 ) -> Pagina[ItemResponse]:
@@ -52,6 +55,12 @@ def listar_itens(
         )
     if classe_abc:
         query = query.filter(ClassificacaoABC.classe == classe_abc)
+    if grupo_material:
+        query = query.filter(Item.grupo_material == grupo_material)
+    if subgrupo_material:
+        query = query.filter(Item.subgrupo_material == subgrupo_material)
+    if classe_material:
+        query = query.filter(Item.classe_material == classe_material)
 
     total = query.count()
     linhas = (
@@ -97,7 +106,7 @@ def listar_consumos(
     item_id: int | None = None,
     data_inicio: date | None = None,
     data_fim: date | None = None,
-    local: str | None = None,
+    setor: str | None = None,
     pagina: int = 1,
     tamanho: int = 50,
 ) -> Pagina[ConsumoResponse]:
@@ -110,8 +119,8 @@ def listar_consumos(
         query = query.filter(Consumo.data >= data_inicio)
     if data_fim is not None:
         query = query.filter(Consumo.data <= data_fim)
-    if local:
-        query = query.filter(Consumo.local_estoque == local)
+    if setor:
+        query = query.filter(Consumo.setor == setor)
 
     total = query.count()
     registros = (

@@ -72,7 +72,7 @@ def montar_email_definicao_senha(nome: str, link: str) -> tuple[str, str]:
           <!-- Botão CTA -->
           <div style="text-align: center; margin-bottom: 32px;">
             <a href="{link}"
-               style="background-color: #0f766e; color: #ffffff; padding: 14px 28px; text-decoration: none; border-radius: 8px; font-weight: 600; font-size: 15px; display: inline-block; box-shadow: 0 2px 4px rgba(15, 118, 110, 0.2);">
+               style="background-color: #0a2342; color: #ffffff; padding: 14px 28px; text-decoration: none; border-radius: 8px; font-weight: 600; font-size: 15px; display: inline-block; box-shadow: 0 2px 4px rgba(10, 35, 66, 0.2);">
                Definir senha e acessar
             </a>
           </div>

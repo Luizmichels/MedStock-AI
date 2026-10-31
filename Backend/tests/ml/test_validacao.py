@@ -65,3 +65,10 @@ def test_selecionar_melhor_ignora_nan():
 def test_selecionar_melhor_lista_vazia_levanta():
     with pytest.raises(ValueError):
         vd.selecionar_melhor([])
+
+
+def test_walk_forward_serie_curta_reduz_horizonte_para_caber():
+    # 3 meses com horizonte 3: sobra 1 mês de treino e o horizonte cai para 2.
+    resultado = vd.walk_forward([10, 20, 30], EstimadorFake, n_dobras=3, horizonte=3)
+    assert resultado["n_dobras"] == 1
+    assert resultado["mae"] == 15.0  # treina com [10] e prevê 10, 10 para [20, 30]

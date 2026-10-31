@@ -2,7 +2,6 @@ import re
 from datetime import date
 from unittest.mock import MagicMock
 
-import httpx
 import pytest
 from dateutil.relativedelta import relativedelta
 from sqlalchemy import create_engine, text
@@ -225,7 +224,7 @@ def serie_consumo(db_session, empresa, item):
             periodo=periodo,
             quantidade_total=float(quantidade),
             valor_total=float(quantidade) * 10.0,
-            local_estoque="Almoxarifado Central",
+            setor="Almoxarifado Central",
         )
         db_session.add(tratado)
         registros.append(tratado)
@@ -237,7 +236,7 @@ def serie_consumo(db_session, empresa, item):
 def csv_valido() -> bytes:
     """CSV mínimo com as 6 colunas obrigatórias e 3 linhas boas."""
     linhas = [
-        "codigo_item;descricao_item;data;quantidade;valor;local_estoque",
+        "codigo_item;descricao_item;data;quantidade;valor;setor",
         "MED001;Dipirona 500mg;01/01/2024;100;250.50;Almoxarifado Central",
         "MED002;Soro Fisiológico 500ml;15/01/2024;50;120.00;Farmácia",
         "MED001;Dipirona 500mg;10/02/2024;80;200.00;Almoxarifado Central",
@@ -249,20 +248,7 @@ def csv_valido() -> bytes:
 def csv_invalido() -> bytes:
     """CSV sem a coluna 'data' — dispara o FA02."""
     linhas = [
-        "codigo_item;descricao_item;quantidade;valor;local_estoque",
+        "codigo_item;descricao_item;quantidade;valor;setor",
         "MED001;Dipirona 500mg;100;250.50;Almoxarifado Central",
     ]
     return "\n".join(linhas).encode("utf-8")
-
-
-@pytest.fixture
-def feriados_mock(respx_mock):
-    """Intercepta GET api.feriados.dev/v1/holidays com payload fixo."""
-    payload = [
-        {"date": "2024-01-01", "name": "Confraternização Universal", "type": "national"},
-        {"date": "2024-12-25", "name": "Natal", "type": "national"},
-        {"date": "2024-03-08", "name": "Aniversário da Cidade", "type": "municipal"},
-    ]
-    rota = respx_mock.get(url__startswith=f"{settings.FERIADOSAPI_BASE_URL}/v1/holidays")
-    rota.mock(return_value=httpx.Response(200, json=payload))
-    return rota

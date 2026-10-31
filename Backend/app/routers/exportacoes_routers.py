@@ -1,4 +1,4 @@
-from datetime import date
+from datetime import date, datetime, timedelta, timezone
 from io import BytesIO
 
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -9,13 +9,16 @@ from app.database import get_db
 from app.dependencies import get_current_user
 from app.models.usuario import Usuario
 from app.services.exportacao import dados
+from app.services.exportacao.dados import Relatorio
 from app.services.exportacao.excel import gerar_xlsx
-from app.services.exportacao.pdf import gerar_pdf
+from app.services.exportacao.pdf import ContextoExportacao, gerar_pdf
 
 router = APIRouter(prefix="/exportacoes", tags=["Exportações"])
 
 _MEDIA_PDF = "application/pdf"
 _MEDIA_XLSX = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+# Horário de Brasília (sem horário de verão desde 2019) para o "gerado em".
+_FUSO_BRASILIA = timezone(timedelta(hours=-3))
 
 
 def _validar_formato(formato: str) -> None:
@@ -31,10 +34,22 @@ def _resposta_arquivo(conteudo: bytes, nome: str, media_type: str) -> StreamingR
     )
 
 
-def _exportar(df, formato: str, titulo: str, nome_base: str, aba: str) -> StreamingResponse:
+def _contexto(usuario: Usuario) -> ContextoExportacao:
+    return ContextoExportacao(
+        hospital=usuario.empresa.nome if usuario.empresa else "—",
+        usuario=usuario.nome,
+        gerado_em=datetime.now(_FUSO_BRASILIA),
+    )
+
+
+def _exportar(
+    relatorio: Relatorio, formato: str, nome_base: str, usuario: Usuario
+) -> StreamingResponse:
+    contexto = _contexto(usuario)
+    nome = f"{nome_base}_{contexto.gerado_em:%Y-%m-%d}"
     if formato == "pdf":
-        return _resposta_arquivo(gerar_pdf(df, titulo), f"{nome_base}.pdf", _MEDIA_PDF)
-    return _resposta_arquivo(gerar_xlsx({aba: df}), f"{nome_base}.xlsx", _MEDIA_XLSX)
+        return _resposta_arquivo(gerar_pdf(relatorio, contexto), f"{nome}.pdf", _MEDIA_PDF)
+    return _resposta_arquivo(gerar_xlsx(relatorio, contexto), f"{nome}.xlsx", _MEDIA_XLSX)
 
 
 @router.get("/previsoes")
@@ -43,9 +58,10 @@ def exportar_previsoes(
     db: Session = Depends(get_db),
     current_user: Usuario = Depends(get_current_user),
 ):
+    """Previsão mensal por material (próximos 3 meses do modelo ativo)."""
     _validar_formato(formato)
-    df = dados.montar_relatorio_previsoes(db, current_user.empresa_id)
-    return _exportar(df, formato, "Relatório de Previsões", "previsoes", "Previsões")
+    relatorio = dados.montar_relatorio_previsoes(db, current_user.empresa_id)
+    return _exportar(relatorio, formato, "previsoes", current_user)
 
 
 @router.get("/consumo")
@@ -56,19 +72,9 @@ def exportar_consumo(
     db: Session = Depends(get_db),
     current_user: Usuario = Depends(get_current_user),
 ):
+    """Consumo do período resumido por material e por setor (Excel: + detalhe mensal)."""
     _validar_formato(formato)
-    df = dados.montar_relatorio_consumo(
+    relatorio = dados.montar_relatorio_consumo(
         db, current_user.empresa_id, data_inicio=data_inicio, data_fim=data_fim
     )
-    return _exportar(df, formato, "Relatório de Consumo", "consumo", "Consumo")
-
-
-@router.get("/metricas")
-def exportar_metricas(
-    formato: str = Query("pdf"),
-    db: Session = Depends(get_db),
-    current_user: Usuario = Depends(get_current_user),
-):
-    _validar_formato(formato)
-    df = dados.montar_relatorio_metricas(db, current_user.empresa_id)
-    return _exportar(df, formato, "Métricas dos Modelos", "metricas", "Métricas")
+    return _exportar(relatorio, formato, "consumo", current_user)

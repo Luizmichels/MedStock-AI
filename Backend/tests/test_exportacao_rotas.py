@@ -26,7 +26,7 @@ def test_exportacao_formato_invalido_da_400(client, token_admin):
 def test_exportacao_disponivel_para_perfil_usuario(client, usuario_comum):
     from tests.conftest import token_para
     resposta = client.get(
-        "/exportacoes/metricas?formato=pdf", headers=_auth(token_para(usuario_comum))
+        "/exportacoes/consumo?formato=pdf", headers=_auth(token_para(usuario_comum))
     )
     assert resposta.status_code == 200
 
@@ -36,7 +36,11 @@ def test_exportacao_sem_autenticacao_rejeitado(client):
     assert resposta.status_code in (401, 403)
 
 
-def test_exportacao_metricas_xlsx(client, token_admin, empresa):
-    resposta = client.get("/exportacoes/metricas?formato=xlsx", headers=_auth(token_admin))
-    assert resposta.status_code == 200
-    assert "spreadsheetml" in resposta.headers["content-type"]
+def test_relatorio_de_metricas_foi_removido(client, token_admin):
+    resposta = client.get("/exportacoes/metricas?formato=pdf", headers=_auth(token_admin))
+    assert resposta.status_code == 404
+
+
+def test_exportacao_nome_do_arquivo_tem_data(client, token_admin, empresa):
+    resposta = client.get("/exportacoes/consumo?formato=pdf", headers=_auth(token_admin))
+    assert "filename=consumo_20" in resposta.headers["content-disposition"]

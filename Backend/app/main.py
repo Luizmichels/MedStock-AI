@@ -14,8 +14,8 @@ from app.routers import (
     auth_routers,
     usuarios_routers,
     empresas_routers,
-    feriados_routers,
     importacoes_routers,
+    integracoes_routers,
     itens_routers,
     consumos_routers,
     previsoes_routers,
@@ -48,9 +48,21 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
+# CORS: o front configurado + extras do .env. Fora de produção também aceita o
+# front aberto por localhost, 127.0.0.1 ou IP da rede local (o "Network" do Next),
+# em qualquer porta — senão o preflight (OPTIONS) do navegador volta 400.
+_ORIGENS_CORS = [settings.FRONTEND_URL] + [
+    o.strip() for o in settings.CORS_ORIGINS_EXTRAS.split(",") if o.strip()
+]
+_REGEX_CORS_DEV = (
+    r"https?://(localhost|127\.0\.0\.1|\[::1\]|192\.168\.\d+\.\d+|10\.\d+\.\d+\.\d+"
+    r"|172\.(1[6-9]|2\d|3[01])\.\d+\.\d+)(:\d+)?"
+)
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[settings.FRONTEND_URL],
+    allow_origins=_ORIGENS_CORS,
+    allow_origin_regex=None if settings.AMBIENTE == "producao" else _REGEX_CORS_DEV,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -66,8 +78,8 @@ async def handler_generico(request: Request, exc: Exception):
 app.include_router(auth_routers.router)
 app.include_router(usuarios_routers.router)
 app.include_router(empresas_routers.router)
-app.include_router(feriados_routers.router)
 app.include_router(importacoes_routers.router)
+app.include_router(integracoes_routers.router)
 app.include_router(itens_routers.router)
 app.include_router(consumos_routers.router)
 app.include_router(previsoes_routers.router)

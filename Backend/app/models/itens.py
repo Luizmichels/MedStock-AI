@@ -14,6 +14,10 @@ class Item(Base):
     codigo_item: Mapped[str] = mapped_column(String(100))
     descricao_item: Mapped[str] = mapped_column(String(500))
     unidade_medida: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    # Informações complementares do material (DS_GRUPO/SUBGRUPO/CLASSE_MATERIAL).
+    grupo_material: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    subgrupo_material: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    classe_material: Mapped[str | None] = mapped_column(String(255), nullable=True)
     ativo: Mapped[bool] = mapped_column(Boolean, default=True)
     criado_em: Mapped[DateTime] = mapped_column(DateTime, server_default=func.now())
 
