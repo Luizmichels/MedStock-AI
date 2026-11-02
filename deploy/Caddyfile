@@ -1,9 +1,14 @@
-# Proxy reverso de produção com HTTPS automático (RNF11).
-# O Caddy emite e renova os certificados (Let's Encrypt) para cada endereço
-# abaixo, desde que o DNS de cada um aponte para o IP da instância.
+# Roteador interno de produção. Fica atrás do Cloudflare Tunnel: o HTTPS é
+# feito pela Cloudflare (RNF11) e o túnel entrega aqui, em HTTP, as requisições
+# de todos os endereços do domínio. O Caddy separa por host, aplica os
+# cabeçalhos de segurança e o limite de upload. Não publica nenhuma porta.
 
 {
-	email {$EMAIL_CERTIFICADO}
+	# A requisição chega pelo container do túnel (rede interna do Docker):
+	# confiar nele mantém o IP real do usuário no X-Forwarded-For.
+	servers {
+		trusted_proxies static private_ranges
+	}
 }
 
 (seguranca) {
@@ -18,13 +23,13 @@
 }
 
 # Frontend (Next.js)
-app.{$DOMINIO} {
+http://app.{$DOMINIO} {
 	import seguranca
 	reverse_proxy frontend:3000
 }
 
 # API (FastAPI)
-api.{$DOMINIO} {
+http://api.{$DOMINIO} {
 	import seguranca
 	# Barra uploads muito acima do limite da API (UPLOAD_MAX_MB) antes de
 	# chegarem ao container.
@@ -35,6 +40,6 @@ api.{$DOMINIO} {
 }
 
 # Domínio raiz e www levam para o frontend.
-{$DOMINIO}, www.{$DOMINIO} {
+http://{$DOMINIO}, http://www.{$DOMINIO} {
 	redir https://app.{$DOMINIO}{uri} permanent
 }
