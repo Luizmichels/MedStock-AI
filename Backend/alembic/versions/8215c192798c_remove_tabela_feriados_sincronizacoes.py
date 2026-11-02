@@ -33,7 +33,7 @@ def downgrade() -> None:
     sa.Column('uf', sa.VARCHAR(length=10), nullable=False),
     sa.Column('cidade', sa.VARCHAR(length=100), nullable=False),
     sa.Column('ano', sa.INTEGER(), nullable=False),
-    sa.Column('sincronizado_em', sa.DATETIME(), server_default=sa.text('(CURRENT_TIMESTAMP)'), nullable=False),
+    sa.Column('sincronizado_em', sa.DateTime(), server_default=sa.func.now(), nullable=False),
     sa.PrimaryKeyConstraint('id'),
     sa.UniqueConstraint('uf', 'cidade', 'ano', name=op.f('uq_feriados_sync_uf_cidade_ano'))
     )
