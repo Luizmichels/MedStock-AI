@@ -1,50 +1,140 @@
-name: CI Backend
+name: CI
 
+# Roda em todo PR para dev/main e em todo push na dev. O workflow de CD
+# (cd.yml) também o chama antes de publicar as imagens, então nada vai para
+# produção sem passar por aqui.
 on:
-  push:
-    branches: [main]
   pull_request:
-    branches: [main]
+    branches: [dev, main]
+  push:
+    branches: [dev]
+  workflow_call:
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  # Num PR, um push novo cancela a rodada anterior; no CD, deixa terminar.
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+permissions:
+  contents: read
+
+env:
+  # Variáveis exigidas pelo Settings da API; nenhuma é segredo real.
+  DATABASE_URL: "sqlite+pysqlite:///:memory:"
+  SECRET_KEY: ci_secret_key
+  SUPER_ADMIN_EMAIL: admin@ci.local
+  SUPER_ADMIN_SENHA: Admin@CI123
+  EMAIL_REMETENTE: ci@ci.local
+  SENHA_EMAIL: senha-ci
 
 jobs:
-  testes:
+  backend:
+    name: Backend (testes)
     runs-on: ubuntu-latest
     defaults:
       run:
         working-directory: Backend
-
-    env:
-      # A suíte usa SQLite em memória por padrão (rápido e sem serviços externos).
-      # Para rodar contra Postgres, defina TEST_DATABASE_URL apontando para um
-      # serviço `postgres` e o conftest usará esse banco.
-      DATABASE_URL: sqlite+pysqlite:///:memory:
-      SECRET_KEY: ci_secret_key
-      SUPER_ADMIN_EMAIL: admin@ci.local
-      SUPER_ADMIN_SENHA: Admin@CI123
-      EMAIL_REMETENTE: ci@ci.local
-      SENHA_EMAIL: senha-ci
-      FERIADOSAPI_KEY: chave-ci
-
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
-      - name: Configurar Python
-        uses: actions/setup-python@v5
+      - uses: actions/setup-python@v7
         with:
-          python-version: "3.12"
+          # Mesma versão da imagem de produção (Backend/Dockerfile).
+          python-version: "3.14"
           cache: pip
+          cache-dependency-path: Backend/requirements.txt
 
       - name: Instalar dependências
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements.txt
 
-      - name: Rodar testes com cobertura (gate 75%)
-        run: pytest --cov=app --cov-report=xml --cov-report=term-missing --cov-fail-under=75
+      # A suíte usa SQLite em memória; a cobertura mínima (75%) vem do pytest.ini.
+      - name: Testes com cobertura
+        run: pytest --cov-report=xml
 
       - name: Publicar relatório de cobertura
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: cobertura
           path: Backend/coverage.xml
+
+  migracoes:
+    name: Migrações (Postgres)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: Backend
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: medstock_ci
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      ALEMBIC_DATABASE_URL: postgresql+psycopg://postgres:postgres@localhost:5432/medstock_ci
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.14"
+          cache: pip
+          cache-dependency-path: Backend/requirements.txt
+
+      - name: Instalar dependências
+        run: pip install -r requirements.txt
+
+      # Banco vazio até a última versão, como no primeiro deploy.
+      - name: Aplicar todas as migrações
+        run: alembic upgrade head
+
+      # Falha se algum modelo mudou sem migração correspondente.
+      - name: Conferir modelos x migrações
+        run: alembic check
+
+      # Garante que dá para voltar versões e subir de novo.
+      - name: Desfazer e reaplicar
+        run: |
+          alembic downgrade base
+          alembic upgrade head
+
+  frontend:
+    name: Frontend (lint, tipos e build)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: Frontend
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v7
+        with:
+          # Mesma versão da imagem de produção (Frontend/Dockerfile).
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: Frontend/package-lock.json
+
+      - name: Instalar dependências
+        run: npm ci
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Checagem de tipos
+        run: npx tsc --noEmit
+
+      - name: Build
+        run: npm run build
+        env:
+          NEXT_PUBLIC_API_URL: https://api.example.com
+          NEXT_TELEMETRY_DISABLED: "1"
