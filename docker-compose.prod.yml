@@ -2,7 +2,12 @@
 #
 # Uso, na raiz do repositório e com o .env de produção criado a partir de
 # deploy/env.producao.example:
-#   docker compose -f docker-compose.prod.yml up -d --build
+#   docker compose -f docker-compose.prod.yml pull
+#   docker compose -f docker-compose.prod.yml up -d
+#
+# As imagens da API e do frontend vêm do GHCR, publicadas pelo CD (cd.yml) a
+# cada merge na main; o deploy/atualizar.sh, no cron, aplica as versões novas.
+# O `build` continua declarado para emergências (`up -d --build` no servidor).
 #
 # Nenhum serviço publica porta. O acesso da internet entra só pelo túnel: o
 # container `tunnel` abre uma conexão de SAÍDA até a Cloudflare (que faz o
@@ -25,6 +30,7 @@ services:
       retries: 5
 
   api:
+    image: ${REGISTRO_IMAGENS:-ghcr.io/luizmichels}/medstock-ai-api:${TAG_IMAGEM:-latest}
     build: ./Backend
     restart: unless-stopped
     env_file:
@@ -49,12 +55,19 @@ services:
         condition: service_healthy
 
   frontend:
+    image: ${REGISTRO_IMAGENS:-ghcr.io/luizmichels}/medstock-ai-frontend:${TAG_IMAGEM:-latest}
     build:
       context: ./Frontend
       args:
         # Embutida no build do Next (variável NEXT_PUBLIC_*).
         NEXT_PUBLIC_API_URL: https://api.${DOMINIO}
     restart: unless-stopped
+    healthcheck:
+      test: [ "CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:3000/login" ]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
     depends_on:
       - api
 
