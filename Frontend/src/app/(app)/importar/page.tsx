@@ -22,6 +22,9 @@ const EXTENSOES = ["csv", "xls", "xlsx"];
 const COLUNAS = ["codigo_item", "descricao_item", "data", "quantidade", "valor", "setor"];
 const COLUNAS_OPCIONAIS = ["grupo_material", "subgrupo_material", "classe_material", "unidade_medida"];
 const MAX_ERROS_EXIBIDOS = 15;
+// Mesmo limite da API (UPLOAD_MAX_MB). Acima dele o envio é barrado no caminho
+// (Caddy ou Cloudflare) sem uma resposta legível, então a checagem é feita aqui.
+const LIMITE_UPLOAD_MB = Number(process.env.NEXT_PUBLIC_UPLOAD_MAX_MB) || 50;
 
 const MODOS: { chave: ModoImportacao; rotulo: string; desc: string }[] = [
   {
@@ -91,6 +94,15 @@ export default function ImportarPage() {
     if (!EXTENSOES.includes(ext)) {
       setArquivo(null);
       setErroArquivo(`Formato .${ext} não suportado. Envie um arquivo CSV ou Excel (.xls, .xlsx).`);
+      return;
+    }
+    if (f.size > LIMITE_UPLOAD_MB * 1024 * 1024) {
+      setArquivo(null);
+      if (entrada.current) entrada.current.value = "";
+      setErroArquivo(
+        `O arquivo tem ${fmtTamanhoArquivo(f.size)} e o limite é ${LIMITE_UPLOAD_MB} MB. ` +
+          "Divida-o em partes menores e importe uma de cada vez no modo incremental.",
+      );
       return;
     }
     setErroArquivo("");
@@ -179,7 +191,9 @@ export default function ImportarPage() {
                 {arquivo ? arquivo.name : "Arraste o arquivo aqui ou clique para selecionar"}
               </span>
               <span className="text-[13px] text-muted">
-                {arquivo ? fmtTamanhoArquivo(arquivo.size) : "CSV (separado por ; ou ,) ou Excel (.xls, .xlsx)"}
+                {arquivo
+                  ? fmtTamanhoArquivo(arquivo.size)
+                  : `CSV (separado por ; ou ,) ou Excel (.xls, .xlsx), até ${LIMITE_UPLOAD_MB} MB`}
               </span>
             </div>
             {/* Fora da área clicável: o clique programático nele não pode "subir" para ela. */}
