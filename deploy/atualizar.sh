@@ -11,17 +11,20 @@
 #   4. se não ficarem: volta às imagens anteriores e marca a nova como
 #      rejeitada, para não tentar de novo até sair outra versão.
 #
+# Pré-requisito na EC2 (imagens privadas no GHCR):
+#   echo "$GHCR_TOKEN" | docker login ghcr.io -u "$USUARIO" --password-stdin
+#
 # Cron (a cada 5 minutos):
 #   */5 * * * * /bin/bash /home/ubuntu/MedStock-AI/deploy/atualizar.sh >> /home/ubuntu/deploy.log 2>&1
 #
-# Limites: o rollback volta as imagens, não o banco (as migrações devem ser
-# compatíveis com a versão anterior; o backup do passo 3 cobre o pior caso) nem
-# os arquivos do repositório.
+# Rollback: reverte as imagens, a revisão do banco (alembic downgrade / backup)
+# e o commit do repositório caso a nova versão não passe na checagem de saúde.
 set -uo pipefail
 
 RAIZ="$(cd "$(dirname "$0")/.." && pwd)"
 ESTADO="${ESTADO_DEPLOY:-$HOME/.medstock-deploy}"
 SERVICOS=(api frontend)
+SERVICOS_SAUDE=(api frontend proxy tunnel)
 ESPERA_SAUDE=240
 
 compose() { docker compose -f docker-compose.prod.yml "$@"; }
@@ -34,14 +37,17 @@ id_rodando() {
 	[ -n "$c" ] && docker inspect -f '{{.Image}}' "$c" 2>/dev/null
 }
 
-# Espera todos os serviços ficarem "healthy"; falha se algum não ficar a tempo.
+# Espera todos os serviços monitorados (api, frontend, proxy e tunnel) ficarem
+# ativos e saudáveis; falha se algum não ficar a tempo.
 aguardar_saude() {
 	local limite=$((SECONDS + ESPERA_SAUDE)) s c estado
-	for s in "${SERVICOS[@]}"; do
+	for s in "${SERVICOS_SAUDE[@]}"; do
 		while :; do
 			c="$(compose ps -q "$s")"
-			estado="$( [ -n "$c" ] && docker inspect -f '{{.State.Health.Status}}' "$c" 2>/dev/null)"
-			[ "$estado" = "healthy" ] && break
+			estado="$( [ -n "$c" ] && docker inspect -f '{{if .State.Health}}{{.State.Health.Status}}{{else}}{{.State.Status}}{{end}}' "$c" 2>/dev/null)"
+			if [ "$estado" = "healthy" ] || [ "$estado" = "running" ]; then
+				break
+			fi
 			if [ "$SECONDS" -ge "$limite" ]; then
 				log "ERRO: $s não ficou saudável (estado: ${estado:-sem container})"
 				return 1
@@ -75,10 +81,16 @@ principal() {
 			log "Repositório: $(git rev-parse --short "$antes") -> $(git rev-parse --short HEAD)"
 		else
 			log "ERRO: não foi possível atualizar o repositório (alterações locais?)"
+			exit 1
 		fi
 	fi
 
-	# 2. Imagens
+	# 2. Imagens e verificação de autenticação no GHCR
+	if ! docker pull "$REGISTRO/medstock-ai-api:$TAG" >/dev/null 2>&1; then
+		log "ERRO: Sem permissão no GHCR. Execute: echo \$GHCR_TOKEN | docker login ghcr.io -u \$USUARIO --password-stdin"
+		exit 1
+	fi
+
 	if ! compose pull -q "${SERVICOS[@]}"; then
 		log "ERRO: falha ao baixar as imagens do GHCR"
 		exit 1
@@ -91,7 +103,12 @@ principal() {
 		atual="$(id_rodando "$s")"
 		anterior[$s]="$atual"
 		[ -z "$nova" ] || [ "$nova" = "$atual" ] && continue
-		[ "$nova" = "$(cat "$ESTADO/rejeitada-$s" 2>/dev/null)" ] && continue
+		if [ "$nova" = "$(cat "$ESTADO/rejeitada-$s" 2>/dev/null)" ]; then
+			# Restaura a tag local para a imagem em execução, evitando que o pull
+			# deixe a imagem rejeitada marcada como :latest.
+			[ -n "$atual" ] && docker tag "$atual" "$(ref "$s")"
+			continue
+		fi
 		mudaram+=("$s")
 	done
 
@@ -99,12 +116,16 @@ principal() {
 		exit 0
 	fi
 
-	# 3. Backup e troca
+	# 3. Backup, registro da migração atual e troca
 	log "Atualizando: ${mudaram[*]:-só configuração}"
 	if ! sh "$RAIZ/deploy/backup.sh"; then
 		log "ERRO: backup falhou; deploy cancelado"
 		exit 1
 	fi
+
+	local revisao_anterior="" revisao_atual="" ultimo_backup=""
+	revisao_anterior="$(compose exec -T api alembic current 2>/dev/null | grep -Eo '^[0-9a-f]+' | head -n 1)"
+
 	# Guarda as imagens em uso para o rollback (tag local, não vai ao GHCR).
 	for s in "${mudaram[@]}"; do
 		[ -n "${anterior[$s]}" ] && docker tag "${anterior[$s]}" "medstock-ai-$s:anterior"
@@ -129,6 +150,26 @@ principal() {
 
 	# 4. Rollback
 	log "Voltando à versão anterior de: ${mudaram[*]:-nenhuma imagem (só configuração)}"
+
+	# Reverte migrações aplicadas pela imagem com falha antes de voltar o container
+	if [ -n "$revisao_anterior" ]; then
+		revisao_atual="$(compose exec -T api alembic current 2>/dev/null | grep -Eo '^[0-9a-f]+' | head -n 1)"
+		if [ -n "$revisao_atual" ] && [ "$revisao_atual" != "$revisao_anterior" ]; then
+			log "Revertendo banco de dados da revisão $revisao_atual para $revisao_anterior"
+			if ! compose exec -T api alembic downgrade "$revisao_anterior"; then
+				log "AVISO: falha no alembic downgrade; restaurando dump do backup.sh"
+				ultimo_backup="$(ls -t "${DESTINO_BACKUP:-$HOME/backups}"/medstock_*.sql.gz 2>/dev/null | head -n 1)"
+				if [ -n "$ultimo_backup" ]; then
+					gzip -cd "$ultimo_backup" | compose exec -T db psql -U postgres -d medstock >/dev/null
+				fi
+			fi
+		fi
+	fi
+
+	if [ "$repo_mudou" -eq 1 ]; then
+		git reset --hard "$antes"
+	fi
+
 	for s in "${mudaram[@]}"; do
 		id_imagem "$(ref "$s")" > "$ESTADO/rejeitada-$s"
 		docker tag "medstock-ai-$s:anterior" "$(ref "$s")"
