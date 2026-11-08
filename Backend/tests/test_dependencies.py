@@ -69,3 +69,28 @@ def test_get_current_super_admin_rejeita_perfil_errado(usuario_admin):
     with pytest.raises(HTTPException) as exc:
         get_current_super_admin(_cred(token))
     assert exc.value.status_code == 403
+
+
+@pytest.mark.parametrize("tipo", ["redefinir_senha", "definir_senha"])
+def test_get_current_user_rejeita_token_de_email(db_session, usuario_admin, tipo):
+    # O link enviado por e-mail não pode valer como sessão.
+    token = criar_token({"sub": str(usuario_admin.id), "tipo": tipo})
+    with pytest.raises(HTTPException) as exc:
+        get_current_user(_cred(token), db_session)
+    assert exc.value.status_code == 401
+
+
+def test_get_current_super_admin_rejeita_token_de_email():
+    token = criar_token({"sub": "1", "perfil": "super_admin", "tipo": "redefinir_senha"})
+    with pytest.raises(HTTPException) as exc:
+        get_current_super_admin(_cred(token))
+    assert exc.value.status_code == 401
+
+
+def test_rota_protegida_rejeita_token_de_redefinicao(client, usuario_admin):
+    token = criar_token({"sub": str(usuario_admin.id), "tipo": "redefinir_senha"})
+    resposta = client.get(
+        "/usuarios/listar/usuarios",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert resposta.status_code == 401
