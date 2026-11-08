@@ -73,8 +73,13 @@ Documentação interativa (Swagger): http://localhost:8000/docs
 
 ## Produção (AWS EC2)
 
-O deploy usa `docker-compose.prod.yml` (banco, API, frontend e proxy Caddy com
-HTTPS) e o `.env` de produção criado a partir de `deploy/env.producao.example`.
+O deploy usa `docker-compose.prod.yml` (banco, API, frontend, proxy Caddy e Cloudflare Tunnel) e o `.env` de produção criado a partir de `deploy/env.producao.example`.
+
+Como as imagens publicadas no GitHub Container Registry (`ghcr.io`) são privadas por padrão, autentique o Docker na instância EC2 antes de iniciar o `deploy/atualizar.sh` (usando um Personal Access Token com permissão `read:packages`):
+
+```bash
+echo "$GHCR_TOKEN" | docker login ghcr.io -u "$USUARIO" --password-stdin
+```
 
 ## Rodando sem Docker
 
