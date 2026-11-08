@@ -35,7 +35,8 @@ services:
       FRONTEND_URL: https://app.${DOMINIO:?defina DOMINIO no .env}
       # A API só é alcançada pelo Caddy (via túnel); confiar no X-Forwarded-For
       # faz o rate limit enxergar o IP real do usuário em vez do IP do proxy.
-      FORWARDED_ALLOW_IPS: "*"
+      UVICORN_FORWARDED_ALLOW_IPS: "*"
+      UVICORN_PROXY_HEADERS: "1"
       # O .env traz o token do túnel; a API não precisa dele.
       CLOUDFLARE_TUNNEL_TOKEN: ""
     healthcheck:
