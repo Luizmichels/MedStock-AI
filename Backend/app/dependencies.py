@@ -15,12 +15,22 @@ def _decodificar_token(credentials: HTTPAuthorizationCredentials) -> dict:
             settings.SECRET_KEY,
             algorithms=[settings.ALGORITHM],
         )
-        return payload
     except JWTError:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Token inválido ou expirado",
         )
+
+    # Tokens de uso único enviados por e-mail ("redefinir_senha",
+    # "definir_senha") são assinados com a mesma chave, mas carregam o campo
+    # "tipo". O token de sessão, emitido no login, não tem esse campo. Sem esta
+    # checagem, o link de redefinição de senha funcionaria como sessão.
+    if payload.get("tipo") is not None:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Token inválido ou expirado",
+        )
+    return payload
 
 def get_current_user(
     credentials: HTTPAuthorizationCredentials = Depends(bearer_scheme),
