@@ -459,3 +459,35 @@ def test_erro_no_meio_remove_linhas_parciais_da_importacao(
 def test_modo_invalido_levanta_erro(db_session, empresa, usuario_admin, csv_valido):
     with pytest.raises(ValueError):
         dp.processar_arquivo(db_session, csv_valido, "a.csv", empresa.id, usuario_admin.id, modo="tudo")
+
+@pytest.mark.parametrize(
+    "entrada, esperado",
+    [
+        ("125,50", 125.50),
+        ("1.234,56", 1234.56),
+        ("12.500,00", 12500.00),
+        ("1,234.56", 1234.56),
+        ("125.50", 125.50),
+        ("100", 100.0),
+    ],
+)
+def test_numerico_aceita_formatos_brasileiros_e_internacionais(
+    entrada, esperado
+):
+    resultado = dp._numerico(pd.Series([entrada]))
+
+    assert resultado.iloc[0] == pytest.approx(esperado)
+
+
+@pytest.mark.parametrize(
+    "entrada",
+    [
+        "texto",
+        "1.2.3,4",
+        "1,23.4",
+    ],
+)
+def test_numerico_rejeita_valores_invalidos(entrada):
+    resultado = dp._numerico(pd.Series([entrada]))
+
+    assert pd.isna(resultado.iloc[0])
