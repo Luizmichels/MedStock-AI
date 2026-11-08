@@ -38,6 +38,57 @@ def test_enviar_solicitacao_excede_rate_limit_da_429(client):
     assert resposta.status_code == 429
 
 
+def test_enviar_solicitacao_rate_limit_com_proxy_headers_preserva_usuarios_distintos(db_session, enviar_email_mock):
+    from fastapi.testclient import TestClient
+    from uvicorn.middleware.proxy_headers import ProxyHeadersMiddleware
+    from app.database import get_db
+    from app.main import app
+
+    def _get_db_override():
+        yield db_session
+
+    app.dependency_overrides[get_db] = _get_db_override
+    try:
+        app_proxy = ProxyHeadersMiddleware(app, trusted_hosts="*")
+        client_proxy = TestClient(app_proxy)
+
+        ip_usuario_1 = "203.0.113.195"
+        ip_usuario_2 = "198.51.100.42"
+
+        # Usuário 1 atinge o teto de 5 requisições
+        for _ in range(5):
+            assert (
+                client_proxy.post(
+                    "/empresas/enviar/solicitacao",
+                    json=SOLICITACAO_VALIDA,
+                    headers={"X-Forwarded-For": ip_usuario_1},
+                ).status_code
+                == 201
+            )
+
+        # 6ª requisição do Usuário 1 é bloqueada (429)
+        assert (
+            client_proxy.post(
+                "/empresas/enviar/solicitacao",
+                json=SOLICITACAO_VALIDA,
+                headers={"X-Forwarded-For": ip_usuario_1},
+            ).status_code
+            == 429
+        )
+
+        # Usuário 2, vindo através do mesmo proxy Caddy mas com outro IP em X-Forwarded-For, não é bloqueado
+        assert (
+            client_proxy.post(
+                "/empresas/enviar/solicitacao",
+                json=SOLICITACAO_VALIDA,
+                headers={"X-Forwarded-For": ip_usuario_2},
+            ).status_code
+            == 201
+        )
+    finally:
+        app.dependency_overrides.clear()
+
+
 def test_enviar_solicitacao_sem_endereco_da_422(client):
     payload = {k: v for k, v in SOLICITACAO_VALIDA.items() if k != "endereco"}
 
