@@ -1,4 +1,4 @@
-"""Testes de contrato das rotas de itens (RF03)."""
+"""Testes de contrato das rotas de itens."""
 
 from app.models.classificacao_abc import ClassificacaoABC
 from app.models.itens import Item

@@ -1,4 +1,4 @@
-"""Schemas do dashboard (RF09, RF12)."""
+"""Schemas do dashboard"""
 
 from datetime import date, datetime
 
@@ -21,7 +21,7 @@ class PontoMensal(BaseModel):
 
 
 class CoberturaPrevisao(BaseModel):
-    """Quanto do consumo (no filtro) está coberto pela previsão do modelo ativo."""
+    """Quanto do consumo está coberto pela previsão do modelo ativo."""
 
     itens_consumidos: int
     itens_com_previsao: int
@@ -32,7 +32,7 @@ class CoberturaPrevisao(BaseModel):
 
 
 class PrevisaoProximoMes(BaseModel):
-    """Previsão do próximo mês (modelo mensal ativo) para os materiais do filtro."""
+    """Previsão do próximo mês para os materiais do filtro."""
 
     mes: date | None = None  # 1º dia do mês previsto
     quantidade_prevista: float

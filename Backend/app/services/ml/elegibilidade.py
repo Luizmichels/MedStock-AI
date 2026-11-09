@@ -1,4 +1,4 @@
-"""Elegibilidade de itens para previsão (RN06 e FA03) — funções puras.
+"""Elegibilidade de itens para previsão funções puras.
 
 Itens com histórico mensal abaixo do mínimo são omitidos do treino e devolvidos
 com o motivo, para alimentar o aviso do FA03.

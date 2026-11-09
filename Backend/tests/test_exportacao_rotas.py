@@ -1,4 +1,4 @@
-"""Testes de contrato das rotas de exportação (RF10, RN04)."""
+"""Testes de contrato das rotas de exportação."""
 
 
 def _auth(token: str) -> dict:

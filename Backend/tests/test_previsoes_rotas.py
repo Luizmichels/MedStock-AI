@@ -1,4 +1,4 @@
-"""Testes de contrato das rotas de previsões (RF06, RF07, RF08, RF11, FA03)."""
+"""Testes de contrato das rotas de previsões."""
 
 from datetime import date
 

@@ -1,4 +1,4 @@
-"""Testes da camada de dados e dos geradores de relatório (RF10, RN04)."""
+"""Testes da camada de dados e dos geradores de relatório."""
 
 from datetime import date, datetime
 from io import BytesIO

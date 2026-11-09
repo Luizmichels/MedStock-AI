@@ -1,4 +1,4 @@
-"""Testes de contrato das rotas do dashboard (RF09, RF12)."""
+"""Testes de contrato das rotas do dashboard."""
 
 from datetime import date
 
