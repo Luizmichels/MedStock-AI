@@ -122,7 +122,7 @@ def abc_xyz(
     db: Session = Depends(get_db),
     current_user: Usuario = Depends(get_current_user),
 ):
-    """Matriz combinada ABC/XYZ (RF05): contagem de itens por classe (ex.: 'AX')."""
+    """Matriz combinada ABC/XYZ: contagem de itens por classe (ex.: 'AX')."""
     return abc_service.matriz_abc_xyz(db, current_user.empresa_id)
 
 

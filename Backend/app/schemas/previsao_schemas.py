@@ -1,4 +1,4 @@
-"""Schemas de modelos treinados e previsões (RF06, RF07, RF08, FA03)."""
+"""Schemas de modelos treinados e previsões"""
 
 from datetime import date, datetime
 

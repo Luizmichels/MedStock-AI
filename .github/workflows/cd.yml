@@ -24,6 +24,8 @@ env:
 jobs:
   ci:
     uses: ./.github/workflows/ci.yml
+    # Repassa o SONAR_TOKEN ao CI; sem isso o job do Sonar não roda na main.
+    secrets: inherit
 
   imagens:
     name: Imagem ${{ matrix.servico }}

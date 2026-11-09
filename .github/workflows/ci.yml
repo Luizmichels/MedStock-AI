@@ -60,6 +60,38 @@ jobs:
           name: cobertura
           path: Backend/coverage.xml
 
+  # Qualidade e segurança do código no SonarQube Cloud, com a cobertura do
+  # backend. Não bloqueia o CI nem o deploy (continue-on-error): uma
+  # instabilidade do Sonar não pode travar a produção. O resultado aparece como
+  # check próprio na PR, colocado pelo app do SonarQube Cloud.
+  sonar:
+    name: SonarQube
+    needs: backend
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    env:
+      SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+    steps:
+      # PRs vindas de fork não recebem segredos; nesse caso a análise é pulada.
+      - name: Conferir token
+        if: env.SONAR_TOKEN == ''
+        run: echo "::notice::SONAR_TOKEN indisponível (PR de fork ou segredo ausente); análise pulada."
+
+      - uses: actions/checkout@v7
+        if: env.SONAR_TOKEN != ''
+        with:
+          # Histórico completo: o Sonar usa o blame para separar código novo.
+          fetch-depth: 0
+
+      - uses: actions/download-artifact@v8
+        if: env.SONAR_TOKEN != ''
+        with:
+          name: cobertura
+          path: Backend
+
+      - uses: SonarSource/sonarqube-scan-action@v8
+        if: env.SONAR_TOKEN != ''
+
   migracoes:
     name: Migrações (Postgres)
     runs-on: ubuntu-latest

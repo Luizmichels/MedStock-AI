@@ -1,4 +1,4 @@
-"""Análise de intermitência da demanda — classificação SBC.
+"""Análise de intermitência da demanda classificação SBC.
 
 Serve para decidir, com dados, se vale a pena prever no DIÁRIO ou se o
 horizonte mensal atual já é adequado. Baseia-se em Syntetos-Boylan-Croston (SBC):

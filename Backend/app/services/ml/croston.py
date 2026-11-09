@@ -4,8 +4,6 @@ Croston separa a série em (tamanho da demanda) e (intervalo entre demandas),
 suaviza cada uma exponencialmente e prevê uma TAXA diária constante = nível /
 intervalo. A variante SBA (Syntetos-Boylan Approximation) aplica o fator de
 correção de viés (1 - alpha/2), recomendado para itens lumpy/intermitentes.
-
-Referência: Syntetos & Boylan (2005).
 """
 
 from __future__ import annotations

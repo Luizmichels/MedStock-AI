@@ -1,4 +1,4 @@
-"""Testes de contrato das rotas de consumos e série temporal (RF03)."""
+"""Testes de contrato das rotas de consumos e série temporal."""
 
 from datetime import date
 
