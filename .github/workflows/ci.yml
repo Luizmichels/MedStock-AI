@@ -89,7 +89,9 @@ jobs:
           name: cobertura
           path: Backend
 
-      - uses: SonarSource/sonarqube-scan-action@v8
+      # Actions de terceiros fixadas pelo SHA do commit (uma tag pode ser
+      # movida para outro código); o comentário indica a versão.
+      - uses: SonarSource/sonarqube-scan-action@e805d875275f728fac1885b413934be6d7c63f65 # v8.4.1
         if: env.SONAR_TOKEN != ''
 
   migracoes:
