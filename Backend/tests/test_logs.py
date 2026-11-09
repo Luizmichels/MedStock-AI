@@ -1,4 +1,4 @@
-"""Testes do registro de logs de execução (RNF09)."""
+"""Testes do registro de logs de execução."""
 
 from app.models.logs_execucao import LogExecucao
 from app.services import data_pipeline_service as dp

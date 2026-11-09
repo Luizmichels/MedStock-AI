@@ -1,7 +1,7 @@
-"""Camada de consulta de itens, consumos e séries temporais (RF03).
+"""Camada de consulta de itens, consumos e séries temporais.
 
 Toda consulta é sempre filtrada por ``empresa_id`` para garantir o isolamento
-de dados entre empresas (RF16).
+de dados entre empresas.
 """
 
 from datetime import date

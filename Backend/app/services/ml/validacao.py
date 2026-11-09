@@ -28,7 +28,7 @@ def walk_forward(
     """Treino expansivo; a cada dobra prevê os próximos ``horizonte`` meses.
 
     ``fabrica_estimador`` é um callable sem argumentos que devolve um estimador
-    novo (com ``fit``/``prever``) — assim cada dobra re-treina do zero.
+    novo (com ``fit``/``prever``) assim cada dobra re-treina do zero.
     """
     valores = np.asarray(serie, dtype=float)
     n = len(valores)

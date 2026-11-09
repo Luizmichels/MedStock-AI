@@ -1,4 +1,4 @@
-"""Schemas de itens (RF03)."""
+"""Schemas de itens"""
 
 from pydantic import BaseModel
 

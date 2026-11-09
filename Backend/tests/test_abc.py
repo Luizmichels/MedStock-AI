@@ -1,4 +1,4 @@
-"""Testes da classificação ABC por valor acumulado (RN05 / correção D1)."""
+"""Testes da classificação ABC por valor acumulado."""
 
 from datetime import date
 
@@ -125,7 +125,7 @@ def test_abc_item_unico_recebe_classe_a(db_session, empresa):
 
 
 # --------------------------------------------------------------------------- #
-# Classificação XYZ (RF05)
+# Classificação XYZ
 # --------------------------------------------------------------------------- #
 def test_classe_xyz_estavel_e_x():
     from app.services.abc_service import classe_xyz

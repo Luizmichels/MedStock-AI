@@ -26,7 +26,7 @@ EXTENSOES_PERMITIDAS = {"csv", "xls", "xlsx"}
 def _processar_importacao_background(
     importacao_id: int, conteudo: bytes, nome_arquivo: str, empresa_id: int
 ) -> None:
-    """Executa o pipeline fora do request (RNF01/RNF02), com sessão própria."""
+    """Executa o pipeline fora do request, com sessão própria."""
     db = SessionLocal()
     try:
         importacao = db.query(Importacao).filter(Importacao.id == importacao_id).first()

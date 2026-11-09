@@ -1,4 +1,4 @@
-"""Montagem dos relatórios (camada pura, testável) — RF10.
+"""Montagem dos relatórios (camada pura, testável)
 
 Cada função devolve um ``Relatorio``: a tabela principal resumida (uma linha por
 material), indicadores para o topo do documento e, para o Excel, abas extras com
