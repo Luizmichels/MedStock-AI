@@ -11,8 +11,8 @@ class ImportacaoResponse(BaseModel):
     total_registros: int
     registros_validos: int
     registros_invalidos: int
-    erros: Optional[List[str]]
+    erros: Optional[List[str]] = None
     criado_em: datetime
-    concluido_em: Optional[datetime]
+    concluido_em: Optional[datetime] = None
 
     model_config = {"from_attributes": True}

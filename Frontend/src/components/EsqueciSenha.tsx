@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { ApiError, esqueciSenha, reenviarAtivacao } from "@/lib/api";
 import Campo from "@/components/Campo";
+import { emailValido } from "@/lib/validacao";
 
 /** Tempo mínimo (s) entre dois envios — as rotas de auth não têm rate limit no back. */
 const ESPERA_REENVIO = 60;
@@ -32,7 +33,7 @@ export default function EsqueciSenha({
 
   async function enviar() {
     const alvo = email.trim();
-    if (!/^\S+@\S+\.\S+$/.test(alvo)) {
+    if (!emailValido(alvo)) {
       setErro("Informe um e-mail válido.");
       return;
     }

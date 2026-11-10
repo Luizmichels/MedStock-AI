@@ -27,7 +27,7 @@ class EmpresaUpdate(BaseModel):
 class EmpresaResponse(BaseModel):
     id: int
     nome: str
-    cnpj: Optional[str]
+    cnpj: Optional[str] = None
     email_responsavel: str
     nome_responsavel: str
     ativa: bool
