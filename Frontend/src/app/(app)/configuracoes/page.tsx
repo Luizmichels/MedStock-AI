@@ -7,9 +7,9 @@ import Toast, { useToast } from "@/components/Toast";
 import { atualizarMeuPerfil, trocarMinhaSenha } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
 import { mensagemErro } from "@/lib/erros";
+import { emailValido } from "@/lib/validacao";
 
 const TAMANHO_MINIMO = 8;
-const EMAIL_VALIDO = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 export default function ConfiguracoesPage() {
   const { mensagem, notificar } = useToast();
@@ -45,7 +45,7 @@ function DadosPessoais({ notificar }: { notificar: (m: string) => void }) {
 
   async function salvar() {
     if (!nomeLimpo) return setErro("Informe o seu nome.");
-    if (!EMAIL_VALIDO.test(emailLimpo)) return setErro("Informe um e-mail válido.");
+    if (!emailValido(emailLimpo)) return setErro("Informe um e-mail válido.");
     if (mudouEmail && !senhaAtual) return setErro("Para trocar o e-mail, confirme a sua senha atual.");
     setSalvando(true);
     setErro("");

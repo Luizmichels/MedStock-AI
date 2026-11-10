@@ -14,6 +14,7 @@ import {
 } from "@/lib/api";
 import { papel, useAuth } from "@/lib/auth";
 import { mensagemErro } from "@/lib/erros";
+import { emailValido } from "@/lib/validacao";
 
 const SENHA_MINIMA = 8;
 
@@ -107,7 +108,7 @@ export default function UsuariosPage() {
     const email = form.email.trim();
     const novo = form.id === null;
     if (!nome) return setErroForm("Informe o nome.");
-    if (!/^\S+@\S+\.\S+$/.test(email)) return setErroForm("Informe um e-mail válido.");
+    if (!emailValido(email)) return setErroForm("Informe um e-mail válido.");
     if (novo && form.senha.length < SENHA_MINIMA)
       return setErroForm(`A senha inicial deve ter pelo menos ${SENHA_MINIMA} caracteres.`);
     if (!novo && form.senha && form.senha.length < SENHA_MINIMA)

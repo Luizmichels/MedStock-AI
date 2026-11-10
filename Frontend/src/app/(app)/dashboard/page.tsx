@@ -105,7 +105,8 @@ export default function DashboardPage() {
 
   useEffect(() => {
     let ativo = true;
-    (async () => {
+    // "void": a função trata os próprios erros; o efeito não espera por ela.
+    void (async () => {
       try {
         const resumo = await resumoDashboard();
         if (!ativo) return;

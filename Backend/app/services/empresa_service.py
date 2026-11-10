@@ -1,5 +1,5 @@
 import secrets
-from datetime import datetime
+from datetime import datetime, timezone
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 from fastapi import HTTPException
@@ -84,7 +84,8 @@ def atualizar_status_solicitacao(
         _criar_empresa_e_admin_a_partir_da_solicitacao(db, sol)
 
     sol.status = novo_status
-    sol.atualizado_em = datetime.utcnow()
+    # Coluna sem fuso: grava o horário UTC "ingênuo", como o utcnow() fazia.
+    sol.atualizado_em = datetime.now(timezone.utc).replace(tzinfo=None)
     db.commit()
     db.refresh(sol)
     return sol
