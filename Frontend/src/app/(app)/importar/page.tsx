@@ -112,7 +112,8 @@ export default function ImportarPage() {
   /** A importação completa apaga a base atual: pede confirmação antes. */
   function pedirEnvio() {
     if (modo === "completa") setConfirmarCompleta(true);
-    else enviar();
+    // enviar() trata os próprios erros (try/catch); não há o que esperar aqui.
+    else void enviar();
   }
 
   async function enviar() {
@@ -178,6 +179,15 @@ export default function ImportarPage() {
                 escolher(e.dataTransfer.files?.[0]);
               }}
               onClick={() => !enviando && entrada.current?.click()}
+              // Também abre pelo teclado (Tab até a área, Enter ou espaço).
+              role="button"
+              tabIndex={enviando ? -1 : 0}
+              aria-disabled={enviando}
+              onKeyDown={(e) => {
+                if (enviando || (e.key !== "Enter" && e.key !== " ")) return;
+                e.preventDefault();
+                entrada.current?.click();
+              }}
               className="flex cursor-pointer flex-col items-center gap-2 rounded-xl border-2 border-dashed px-5 py-9 text-center transition"
               style={{
                 borderColor: arrastando ? "#4AA8E0" : "#B9CCE0",

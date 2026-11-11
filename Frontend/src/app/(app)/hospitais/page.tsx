@@ -313,10 +313,11 @@ function ConfirmarReprovar({
 }) {
   return (
     <div
-      onClick={onCancelar}
+      role="presentation"
+      onClick={(e) => e.target === e.currentTarget && onCancelar()}
       className="fixed inset-0 z-40 grid place-items-center bg-[rgba(7,26,46,.55)] p-5"
     >
-      <div onClick={(e) => e.stopPropagation()} className="w-full max-w-[440px] overflow-hidden rounded-2xl bg-white shadow-[0_30px_80px_rgba(0,0,0,.35)]">
+      <div role="dialog" aria-modal="true" aria-label="Reprovar solicitação" className="w-full max-w-[440px] overflow-hidden rounded-2xl bg-white shadow-[0_30px_80px_rgba(0,0,0,.35)]">
         <div className="border-b border-line-200 px-5 py-4">
           <h3 className="text-base font-bold text-ink">Reprovar solicitação</h3>
         </div>
@@ -389,8 +390,12 @@ function ModalEditar({
   }
 
   return (
-    <div onClick={onFechar} className="fixed inset-0 z-40 grid place-items-center bg-[rgba(7,26,46,.55)] p-5">
-      <div onClick={(e) => e.stopPropagation()} className="flex w-full max-w-[460px] flex-col gap-4 rounded-2xl bg-white px-7 py-6 shadow-[0_30px_80px_rgba(0,0,0,.35)]">
+    <div
+      role="presentation"
+      onClick={(e) => e.target === e.currentTarget && onFechar()}
+      className="fixed inset-0 z-40 grid place-items-center bg-[rgba(7,26,46,.55)] p-5"
+    >
+      <div role="dialog" aria-modal="true" aria-label="Editar instituição" className="flex w-full max-w-[460px] flex-col gap-4 rounded-2xl bg-white px-7 py-6 shadow-[0_30px_80px_rgba(0,0,0,.35)]">
         <h3 className="text-lg font-extrabold text-navy">Editar instituição</h3>
 
         <CampoModal label="Hospital" value={nome} onChange={setNome} />

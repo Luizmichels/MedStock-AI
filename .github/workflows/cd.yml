@@ -64,6 +64,10 @@ jobs:
             type=raw,value=latest
             type=sha,prefix=sha-
 
+      # Mesmo valor da tag sha-<7 caracteres> acima.
+      - id: versao
+        run: echo "valor=sha-${GITHUB_SHA::7}" >> "$GITHUB_OUTPUT"
+
       - uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
         with:
           context: ${{ matrix.contexto }}
@@ -71,8 +75,10 @@ jobs:
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
-          # Só o frontend usa: a URL da API é embutida no build do Next.
+          # NEXT_PUBLIC_API_URL: só o frontend usa (embutida no build do Next).
+          # VERSAO: só a API usa (vai em cada linha de log).
           build-args: |
             NEXT_PUBLIC_API_URL=https://api.${{ vars.DOMINIO || 'medstock.com.br' }}
+            VERSAO=${{ steps.versao.outputs.valor }}
           cache-from: type=gha,scope=${{ matrix.servico }}
           cache-to: type=gha,mode=max,scope=${{ matrix.servico }}

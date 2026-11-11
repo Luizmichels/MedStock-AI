@@ -389,6 +389,9 @@ export interface Competencia {
 
 const NOMES_MESES = ["jan", "fev", "mar", "abr", "mai", "jun", "jul", "ago", "set", "out", "nov", "dez"];
 
+/** Meses no formato "AAAA-MM": a ordem do texto já é a ordem cronológica. */
+const compararMes = (a: string, b: string) => a.localeCompare(b);
+
 export function SeletorCompetencia({
   valor,
   limiteInicio,
@@ -419,7 +422,7 @@ export function SeletorCompetencia({
 
   // Intervalo destacado: o escolhido ou, durante a seleção, o que está sob o mouse.
   const [ini, fim] = pendente
-    ? [pendente, sobre ?? pendente].sort()
+    ? [pendente, sobre ?? pendente].sort(compararMes)
     : [valor.inicio, valor.fim];
 
   function escolher(mes: string) {
@@ -427,7 +430,7 @@ export function SeletorCompetencia({
       setPendente(mes);
       return;
     }
-    const [a, b] = [pendente, mes].sort();
+    const [a, b] = [pendente, mes].sort(compararMes);
     onChange({ inicio: a, fim: b });
     setAberto(false);
   }

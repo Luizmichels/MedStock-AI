@@ -21,12 +21,16 @@ export default function Modal({
   }, [onFechar]);
 
   return (
-    <div onClick={onFechar} className="fixed inset-0 z-40 grid place-items-center bg-[rgba(7,26,46,.55)] p-5">
+    // Fundo: o clique fora da janela fecha (o teclado fecha com Esc, acima).
+    <div
+      role="presentation"
+      onClick={(e) => e.target === e.currentTarget && onFechar()}
+      className="fixed inset-0 z-40 grid place-items-center bg-[rgba(7,26,46,.55)] p-5"
+    >
       <div
         role="dialog"
         aria-modal="true"
         aria-label={titulo}
-        onClick={(e) => e.stopPropagation()}
         className="w-full max-w-[520px] overflow-hidden rounded-2xl bg-white shadow-[0_30px_80px_rgba(0,0,0,.35)]"
       >
         <div className="flex items-center justify-between border-b border-line-200 px-6 py-4">
