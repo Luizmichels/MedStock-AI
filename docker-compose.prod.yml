@@ -1,22 +1,51 @@
-# Produção (EC2): banco, API, frontend, roteador interno (Caddy) e Cloudflare Tunnel.
-#
-# Uso, na raiz do repositório e com o .env de produção criado a partir de
-# deploy/env.producao.example:
-#   docker compose -f docker-compose.prod.yml pull
-#   docker compose -f docker-compose.prod.yml up -d
-#
-# As imagens da API e do frontend vêm do GHCR, publicadas pelo CD (cd.yml) a
-# cada merge na main; o deploy/atualizar.sh, no cron, aplica as versões novas.
-# O `build` continua declarado para emergências (`up -d --build` no servidor).
+# EC2: banco, API, frontend, roteador interno (Caddy) e Cloudflare Tunnel.
 #
 # Nenhum serviço publica porta. O acesso da internet entra só pelo túnel: o
 # container `tunnel` abre uma conexão de SAÍDA até a Cloudflare (que faz o
 # HTTPS) e entrega as requisições ao Caddy, que roteia por host.
 
+# Logs no CloudWatch (grupo /medstock/prod/app, um fluxo por container). A EC2
+# tem permissão pela função IAM medstock-ec2-cloudwatch.
+# - non-blocking: se o CloudWatch ficar fora do ar, os containers seguem
+#   funcionando e só as linhas mais antigas do buffer se perdem.
+# - `docker compose logs` continua funcionando pelo cache local do Docker, que
+#   tem rotação própria.
+# Para voltar ao log local numa emergência: apague os blocos `logging:` e rode
+# `docker compose -f docker-compose.prod.yml up -d`.
+x-logs-cloudwatch: &logs-cloudwatch
+  driver: awslogs
+  options:
+    awslogs-region: us-east-2
+    awslogs-group: /medstock/prod/app
+    tag: "{{.Name}}"
+    mode: non-blocking
+    max-buffer-size: 4m
+
+# Log só no servidor, com rotação (sem ela, o arquivo do Docker cresce sem fim).
+x-logs-locais: &logs-locais
+  driver: json-file
+  options:
+    max-size: 10m
+    max-file: "3"
+
 services:
   db:
     image: postgres:16
     restart: unless-stopped
+    logging: *logs-cloudwatch
+    # Consultas acima de 500 ms vão para o log, sem os valores (LGPD):
+    # log_parameter_max_length=0 omite os parâmetros, e o modo terse omite o
+    # DETAIL dos erros (ex.: "Key (email)=(...) already exists").
+    command:
+      - postgres
+      - -c
+      - log_min_duration_statement=500
+      - -c
+      - log_parameter_max_length=0
+      - -c
+      - log_error_verbosity=terse
+      - -c
+      - log_checkpoints=off
     environment:
       POSTGRES_USER: postgres
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?defina POSTGRES_PASSWORD no .env}
@@ -33,6 +62,7 @@ services:
     image: ${REGISTRO_IMAGENS:-ghcr.io/luizmichels}/medstock-ai-api:${TAG_IMAGEM:-latest}
     build: ./Backend
     restart: unless-stopped
+    logging: *logs-cloudwatch
     env_file:
       - .env
     environment:
@@ -62,6 +92,7 @@ services:
         # Embutida no build do Next (variável NEXT_PUBLIC_*).
         NEXT_PUBLIC_API_URL: https://api.${DOMINIO}
     restart: unless-stopped
+    logging: *logs-cloudwatch
     healthcheck:
       test: [ "CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:3000/login" ]
       interval: 30s
@@ -74,6 +105,9 @@ services:
   proxy:
     image: caddy:2-alpine
     restart: unless-stopped
+    # Fica fora do CloudWatch: quando um upstream cai, o log de erro do Caddy
+    # traz a URL completa, que pode ser o link de definir senha com o token.
+    logging: *logs-locais
     environment:
       DOMINIO: ${DOMINIO}
       LIMITE_UPLOAD_PROXY: ${LIMITE_UPLOAD_PROXY:-60MB}
@@ -90,6 +124,7 @@ services:
   tunnel:
     image: cloudflare/cloudflared:2026.10.0
     restart: unless-stopped
+    logging: *logs-cloudwatch
     command: tunnel --no-autoupdate run
     environment:
       TUNNEL_TOKEN: ${CLOUDFLARE_TUNNEL_TOKEN:?defina CLOUDFLARE_TUNNEL_TOKEN no .env}
