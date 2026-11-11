@@ -10,6 +10,7 @@ from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
 from app.core.config import settings
+from app.core.logs import MiddlewareLogs, configurar_logs
 import app.models  # noqa: F401 — registra todos os modelos no metadata
 from app.database import Base, engine, get_db
 
@@ -28,10 +29,8 @@ from app.routers import (
 
 #teste pr
 
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s | %(levelname)s | %(name)s | %(message)s",
-)
+# JSON em produção lido no CloudWatch
+configurar_logs(json_=settings.AMBIENTE == "producao", versao=settings.VERSAO)
 
 
 @asynccontextmanager
@@ -70,11 +69,15 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+app.add_middleware(MiddlewareLogs)
 
 
 @app.exception_handler(Exception)
 async def handler_generico(request: Request, exc: Exception):
-    logging.getLogger(__name__).error("Exceção não tratada: %s", exc, exc_info=True)
+    # Só o tipo na mensagem
+    logging.getLogger(__name__).error(
+        "Exceção não tratada: %s", type(exc).__name__, exc_info=exc
+    )
     return JSONResponse(status_code=500, content={"detail": "Erro interno do servidor."})
 
 
