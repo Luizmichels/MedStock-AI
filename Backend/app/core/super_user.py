@@ -42,6 +42,6 @@ def super_admin() -> None:
         logger.info("Super admin criado com sucesso")
     except Exception as e:
         db.rollback()
-        logger.error(f"Erro ao criar super admin: {e}")
+        logger.error("Erro ao criar super admin: %s", type(e).__name__, exc_info=e)
     finally:
         db.close()

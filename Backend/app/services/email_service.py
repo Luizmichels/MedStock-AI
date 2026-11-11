@@ -26,7 +26,8 @@ def enviar_email(destinatario: str, assunto: str, texto: str, html: str) -> None
         smtp.login(settings.EMAIL_REMETENTE, settings.SENHA_EMAIL)
         smtp.send_message(mensagem)
 
-    logger.info("E-mail enviado para=%s assunto=%s", destinatario, assunto)
+    # O destinatário não entra no log o assunto é fixo por tipo de e-mail
+    logger.info("E-mail enviado: %s", assunto)
 
 
 def montar_email_definicao_senha(nome: str, link: str) -> tuple[str, str]:

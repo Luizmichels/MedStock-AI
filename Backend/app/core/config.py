@@ -4,6 +4,8 @@ from pydantic_settings import BaseSettings
 class Settings(BaseSettings):
     # Ambiente de execução: "desenvolvimento" | "producao". Rotas de conveniência
     AMBIENTE: str = "desenvolvimento"
+    # Versão da imagem gravada no build pelo CD e enviada em cada linha de log, para ligar um erro ao deploy que o causou
+    VERSAO: str = "local"
     UPLOAD_MAX_MB: int = 50
     DATABASE_URL: str
     TEST_DATABASE_URL: str | None = None

@@ -5,6 +5,7 @@ from jose import jwt, JWTError
 from app.database import get_db
 from app.models.usuario import Usuario
 from app.core.config import settings
+from app.core.logs import atualizar_contexto
 
 bearer_scheme = HTTPBearer()
 
@@ -36,6 +37,8 @@ def get_current_user(
     ).first()
     if not usuario:
         raise HTTPException(status_code=401, detail="Usuário não encontrado ou inativo")
+    # Identifica a requisição nos logs só os IDs numéricos, nunca o e-mail
+    atualizar_contexto(usuario_id=usuario.id, empresa_id=usuario.empresa_id)
     return usuario
 
 PERFIS_ADMINISTRATIVOS = {"admin", "super_admin"}
@@ -58,4 +61,5 @@ def get_current_super_admin(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Acesso restrito ao Super Admin",
         )
+    atualizar_contexto(usuario_id=payload.get("sub"))
     return payload

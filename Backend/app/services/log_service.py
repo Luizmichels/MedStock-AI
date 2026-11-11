@@ -1,6 +1,11 @@
+import logging
+
 from sqlalchemy.orm import Session
 
 from app.models.logs_execucao import LogExecucao
+
+_logger = logging.getLogger("app.execucao")
+_NIVEIS = {"debug": logging.DEBUG, "info": logging.INFO, "aviso": logging.WARNING, "erro": logging.ERROR}
 
 
 def registrar(
@@ -22,6 +27,13 @@ def registrar(
     db.add(log)
     db.commit()
     db.refresh(log)
+
+    # log da aplicação, para os erros de importação e treino chegarem aos alertas
+    _logger.log(
+        _NIVEIS.get(nivel, logging.INFO),
+        mensagem,
+        extra={"dados": {"modulo": modulo, "empresa_id": empresa_id}},
+    )
     return log
 
 
