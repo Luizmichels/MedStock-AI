@@ -11,6 +11,13 @@ def test_health_retorna_ok_quando_banco_disponivel(client):
     }
 
 
+def test_health_aceita_head(client):
+    resposta = client.head("/health")
+
+    assert resposta.status_code == 200
+    assert resposta.content == b""
+
+
 def test_health_retorna_503_quando_banco_indisponivel(
     client,
     db_session,
