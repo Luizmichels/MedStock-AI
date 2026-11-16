@@ -68,6 +68,40 @@ def test_treinar_empresa_registra_selecao_por_item(db_session, empresa, item, se
     assert modelo.parametros["itens"][str(item.id)]["algoritmo"] in ALGORITMOS
 
 
+def test_treinar_empresa_guarda_o_previsto_na_validacao_com_o_mes(
+    db_session, empresa, item, serie_consumo
+):
+    # Série de jan/2024 a jun/2025 (18 meses): a validação cobre os 9 últimos.
+    modelo = treinamento.treinar_empresa(db_session, empresa.id, fabrica=fabrica_fake)
+    validacao = modelo.parametros["itens"][str(item.id)]["validacao"]
+    assert validacao["inicio"] == "2024-10-01"
+    assert len(validacao["previstos"]) == 9
+    assert all(isinstance(v, float) for v in validacao["previstos"])
+
+
+def test_pontos_validacao_compacto_nao_finito_vira_none():
+    from app.services.ml.validacao import ResultadoAvaliacao
+
+    resultado = ResultadoAvaliacao(
+        "sma", mae=1, rmse=1, mape=1, previstos=[(1, 5.123), (2, float("nan"))]
+    )
+    assert treinamento._pontos_validacao(resultado, 3, date(2024, 3, 1)) == {
+        "inicio": "2024-02-01", "previstos": [5.12, None]
+    }
+    assert treinamento._pontos_validacao(resultado, 3, None) is None
+    sem_previstos = ResultadoAvaliacao("sma", mae=1, rmse=1, mape=1)
+    assert treinamento._pontos_validacao(sem_previstos, 3, date(2024, 3, 1)) is None
+
+
+def test_validacao_por_mes_expande_e_ignora_none():
+    pontos = predicao._validacao_por_mes({"inicio": "2024-11-01", "previstos": [1.0, None, 3.0]})
+    assert pontos == [
+        {"periodo": date(2024, 11, 1), "quantidade_prevista": 1.0},
+        {"periodo": date(2025, 1, 1), "quantidade_prevista": 3.0},
+    ]
+    assert predicao._validacao_por_mes(None) == []
+
+
 def test_gerar_previsoes_usa_algoritmo_escolhido_do_item(db_session, empresa, item, serie_consumo):
     modelo = treinamento.treinar_empresa(db_session, empresa.id, fabrica=fabrica_fake)
     # Fixa a escolha do item num algoritmo conhecido.

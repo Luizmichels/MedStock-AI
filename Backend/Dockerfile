@@ -14,6 +14,13 @@ COPY . .
 
 EXPOSE 8000
 
+# Bibliotecas numéricas (OpenMP/BLAS) usam todos os núcleos por padrão. O treino
+# roda no mesmo processo da API; limitar a 1 deixa CPU livre para as requisições.
+# O LightGBM também recebe n_jobs=ML_THREADS (app/core/config.py).
+ENV OMP_NUM_THREADS=1 \
+    OPENBLAS_NUM_THREADS=1 \
+    MKL_NUM_THREADS=1
+
 # Versão da imagem, passada pelo CD e gravada em cada linha de log
 ARG VERSAO=local
 ENV VERSAO=$VERSAO

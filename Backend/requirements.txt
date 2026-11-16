@@ -1,25 +1,32 @@
-fastapi
-uvicorn
-sqlalchemy
-psycopg[binary]
-alembic
-python-jose[cryptography]
-bcrypt
-python-multipart
-pandas
-numpy
-openpyxl
-lightgbm
-skforecast
-statsmodels
-python-dateutil
-httpx
-apscheduler
-reportlab
-python-dotenv
-pydantic-settings
-email-validator
-pytest
-pytest-cov
-respx
-freezegun
+# Versões fixas: as mesmas em que a suíte de testes passa. Sem isso, cada build
+# instala a versão mais nova e pode quebrar sem aviso (o LightGBM 4.7 passou a
+# recusar treinar com 1 exemplo). Para atualizar: subir a versão aqui, rodar os
+# testes e só então fazer o deploy.
+fastapi==0.139.0
+uvicorn==0.50.2
+sqlalchemy==2.0.51
+psycopg[binary]==3.3.4
+alembic==1.18.5
+python-jose[cryptography]==3.5.0
+bcrypt==5.0.0
+python-multipart==0.0.32
+pandas==2.3.3
+numpy==2.4.6
+openpyxl==3.1.5
+lightgbm==4.6.0
+scikit-learn==1.9.0
+scipy==1.18.0
+skforecast==0.22.0
+statsmodels==0.14.6
+python-dateutil==2.9.0.post0
+httpx==0.28.1
+apscheduler==3.11.3
+reportlab==5.0.0
+python-dotenv==1.2.2
+pydantic==2.13.4
+pydantic-settings==2.14.2
+email-validator==2.3.0
+pytest==9.1.1
+pytest-cov==7.1.0
+respx==0.23.1
+freezegun==1.5.5

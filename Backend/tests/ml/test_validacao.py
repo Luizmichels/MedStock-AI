@@ -67,8 +67,22 @@ def test_selecionar_melhor_lista_vazia_levanta():
         vd.selecionar_melhor([])
 
 
+def test_walk_forward_devolve_o_previsto_de_cada_mes_de_teste():
+    # 12 meses, 3 dobras de 3: os 9 últimos (posições 3 a 11) são previstos.
+    resultado = vd.walk_forward(SERIE, EstimadorFake, n_dobras=3, horizonte=3)
+    assert [indice for indice, _ in resultado["previstos"]] == list(range(3, 12))
+    # O fake prevê a média do treino: a 1ª dobra treina com [10, 12, 11].
+    assert resultado["previstos"][0][1] == pytest.approx(11.0)
+
+
+def test_comparar_algoritmos_guarda_os_previstos():
+    resultados = vd.comparar_algoritmos(SERIE, algoritmos=("x",), fabrica=fabrica_fake, horizonte=3)
+    assert len(resultados[0].previstos) == 9
+
+
 def test_walk_forward_serie_curta_reduz_horizonte_para_caber():
     # 3 meses com horizonte 3: sobra 1 mês de treino e o horizonte cai para 2.
     resultado = vd.walk_forward([10, 20, 30], EstimadorFake, n_dobras=3, horizonte=3)
     assert resultado["n_dobras"] == 1
     assert resultado["mae"] == 15.0  # treina com [10] e prevê 10, 10 para [20, 30]
+    assert resultado["previstos"] == [(1, 10.0), (2, 10.0)]

@@ -129,6 +129,28 @@ def _nan_para_none(valor: float) -> float | None:
     return None if valor is None or math.isnan(valor) else float(valor)
 
 
+def _pontos_validacao(
+    resultado: ResultadoAvaliacao, tamanho_serie: int, ultimo_periodo: date | None
+) -> dict | None:
+    """O que o algoritmo vencedor previu na validação, para a tela comparar
+    previsto e realizado. Os meses de teste são consecutivos, então guarda só o
+    1º mês e a lista de valores (compacto: vai no JSON de todos os itens). A série
+    do treino termina no último mês do item, então a posição ``i`` é o mês
+    ``ultimo - (tamanho - 1 - i)``. Valor não finito vira ``None`` (o JSON do
+    Postgres não aceita NaN)."""
+    if ultimo_periodo is None or not resultado.previstos:
+        return None
+    primeiro = resultado.previstos[0][0]
+    inicio = ultimo_periodo - relativedelta(months=tamanho_serie - 1 - primeiro)
+    return {
+        "inicio": inicio.isoformat(),
+        "previstos": [
+            round(float(valor), 2) if math.isfinite(valor) else None
+            for _, valor in resultado.previstos
+        ],
+    }
+
+
 def desativar_modelos_anteriores(db: Session, empresa_id: int) -> None:
     db.query(ModeloTreinado).filter(
         ModeloTreinado.empresa_id == empresa_id, ModeloTreinado.ativo.is_(True)
@@ -171,6 +193,7 @@ def treinar_empresa(
     selecao = selecionar_algoritmo_por_item(
         elegiveis, algoritmos=algoritmos, fabrica=fabrica, n_dobras=n_dobras, horizonte=horizonte
     )
+    ultimos = ultimo_periodo_por_item(db, empresa_id)
     melhores = list(selecao.values())
     # Métrica-cabeçalho do modelo = MEDIANA das métricas por item (o item típico)
     mae = _mediana_sem_nan([r.mae for r in melhores])
@@ -203,6 +226,9 @@ def treinar_empresa(
                     "mae": _nan_para_none(r.mae),
                     "rmse": _nan_para_none(r.rmse),
                     "mape": _nan_para_none(r.mape),
+                    "validacao": _pontos_validacao(
+                        r, len(elegiveis[item_id]), ultimos.get(item_id)
+                    ),
                 }
                 for item_id, r in selecao.items()
             },

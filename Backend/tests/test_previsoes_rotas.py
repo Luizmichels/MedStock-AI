@@ -192,6 +192,24 @@ def test_previsao_mensal_item_traz_historico_previsao_e_algoritmo(
     assert corpo["previsoes"][0]["periodo"] == "2025-07-01"
     assert corpo["algoritmo"] == modelo.parametros["itens"][str(item.id)]["algoritmo"]
     assert corpo["mae"] is not None
+    # O que o modelo previu na validação, para comparar com o realizado.
+    assert len(corpo["validacao"]) == 9
+    assert corpo["validacao"][0]["periodo"] == "2024-10-01"
+    assert set(corpo["validacao"][0]) == {"periodo", "quantidade_prevista"}
+
+
+def test_previsao_mensal_item_modelo_antigo_sem_validacao(
+    client, db_session, token_admin, empresa, item, serie_consumo
+):
+    modelo = treinamento.treinar_empresa(db_session, empresa.id, fabrica=fabrica_fake)
+    predicao.gerar_previsoes(db_session, empresa.id, modelo, fabrica=fabrica_fake)
+    # Simula um modelo treinado antes de a validação ser guardada.
+    modelo.parametros = {"selecao": "por_item", "itens": {str(item.id): {"algoritmo": "sma", "mae": 1.0}}}
+    db_session.commit()
+
+    corpo = client.get(f"/previsoes/mensal/{item.id}", headers=_auth(token_admin)).json()
+    assert corpo["validacao"] == []
+    assert len(corpo["previsoes"]) == predicao.HORIZONTE_PADRAO
 
 
 def test_previsao_mensal_item_sem_modelo_traz_so_historico(
@@ -211,6 +229,7 @@ def test_previsao_mensal_item_sem_modelo_traz_so_historico(
     assert [p["quantidade"] for p in corpo["historico"]] == [5.0, 0.0, 7.0]  # fevereiro zerado
     assert corpo["previsoes"] == []
     assert corpo["algoritmo"] is None
+    assert corpo["validacao"] == []
 
 
 def test_previsao_mensal_item_de_outra_empresa_404(
