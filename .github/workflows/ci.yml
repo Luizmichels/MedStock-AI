@@ -61,12 +61,12 @@ jobs:
           path: Backend/coverage.xml
 
   # Qualidade e segurança do código no SonarQube Cloud, com a cobertura do
-  # backend. Não bloqueia o CI nem o deploy (continue-on-error): uma
+  # backend e do frontend. Não bloqueia o CI nem o deploy (continue-on-error): uma
   # instabilidade do Sonar não pode travar a produção. O resultado aparece como
   # check próprio na PR, colocado pelo app do SonarQube Cloud.
   sonar:
     name: SonarQube
-    needs: backend
+    needs: [backend, frontend]
     runs-on: ubuntu-latest
     continue-on-error: true
     env:
@@ -88,6 +88,12 @@ jobs:
         with:
           name: cobertura
           path: Backend
+
+      - uses: actions/download-artifact@v8
+        if: env.SONAR_TOKEN != ''
+        with:
+          name: cobertura-frontend
+          path: Frontend/coverage
 
       # Actions de terceiros fixadas pelo SHA do commit (uma tag pode ser
       # movida para outro código); o comentário indica a versão.
@@ -166,6 +172,22 @@ jobs:
 
       - name: Checagem de tipos
         run: npx tsc --noEmit
+
+      # Vitest + Testing Library; a cobertura mínima (25%) vem do vitest.config.mts.
+      - name: Testes com cobertura
+        run: npm run test:coverage
+
+      # O lcov traz caminhos relativos ao Frontend/ ("SF:src/..."); o Sonar
+      # analisa a partir da raiz do repositório e precisa de "SF:Frontend/src/...".
+      - name: Ajustar caminhos da cobertura
+        if: always()
+        run: sed -i 's|^SF:|SF:Frontend/|' coverage/lcov.info
+
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: cobertura-frontend
+          path: Frontend/coverage/lcov.info
 
       - name: Build
         run: npm run build
