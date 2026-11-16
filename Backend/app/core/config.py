@@ -7,6 +7,9 @@ class Settings(BaseSettings):
     # Versão da imagem gravada no build pelo CD e enviada em cada linha de log, para ligar um erro ao deploy que o causou
     VERSAO: str = "local"
     UPLOAD_MAX_MB: int = 50
+    # Núcleos que o treino (LightGBM) pode usar. O treino roda no mesmo processo da
+    # API: com 1, sobra CPU para a API responder durante o treino no servidor de 2 vCPUs.
+    ML_THREADS: int = 1
     DATABASE_URL: str
     TEST_DATABASE_URL: str | None = None
     SECRET_KEY: str
