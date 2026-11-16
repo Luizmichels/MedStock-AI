@@ -34,6 +34,14 @@ class PontoHistoricoMensal(BaseModel):
     quantidade: float
 
 
+class PontoValidacaoMensal(BaseModel):
+    """O que o modelo previu para um mês do passado na validação walk-forward
+    (treinado só com os meses anteriores), para comparar com o realizado."""
+
+    periodo: date
+    quantidade_prevista: float
+
+
 class PrevisaoMensalDetalhe(BaseModel):
     """Histórico e previsão mensal de um item, com o algoritmo escolhido para ele
     no treino e as métricas da validação walk-forward."""
@@ -45,6 +53,7 @@ class PrevisaoMensalDetalhe(BaseModel):
     mape: float | None = None
     historico: list[PontoHistoricoMensal]
     previsoes: list[PrevisaoResponse]
+    validacao: list[PontoValidacaoMensal] = []
 
 
 class ResumoPrevisaoItem(BaseModel):

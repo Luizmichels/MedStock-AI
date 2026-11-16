@@ -16,6 +16,7 @@ import {
   ItemResponse,
   MaterialFiltro,
   ModeloTreinadoResponse,
+  PontoValidacaoMensal,
   PrevisaoMensalDetalhe,
   ResumoPrevisaoItem,
   detalheMensal,
@@ -420,15 +421,33 @@ function CartaoGrafico({
   const unidade = item?.unidade_medida || "unid.";
   const proximo = r.previsoes[0];
   const pronto = !carregando && mensal && mensal.item_id === r.item_id;
+  // Liga a linha "previsto pelo modelo" sobre o consumo realizado. Fica ligado ao
+  // trocar de material, para comparar vários em sequência.
+  const [comparar, setComparar] = useState(false);
+  const semValidacao = pronto && (mensal.validacao ?? []).length === 0;
 
   return (
     <div className="previa-card px-[22px] py-5">
-      <div className="min-w-0">
-        <span className="text-xs text-muted">
-          Consumo mensal · {unidade}
-          {item?.codigo_item && <span className="font-mono"> · {item.codigo_item}</span>}
-        </span>
-        <h3 className="mt-0.5 truncate text-lg font-bold">{item?.descricao_item ?? `Item ${r.item_id}`}</h3>
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div className="min-w-0">
+          <span className="text-xs text-muted">
+            Consumo mensal · {unidade}
+            {item?.codigo_item && <span className="font-mono"> · {item.codigo_item}</span>}
+          </span>
+          <h3 className="mt-0.5 truncate text-lg font-bold">{item?.descricao_item ?? `Item ${r.item_id}`}</h3>
+        </div>
+        <button
+          type="button"
+          aria-pressed={comparar}
+          onClick={() => setComparar((c) => !c)}
+          className={`h-8 flex-none rounded-full border px-3.5 text-xs font-bold transition ${
+            comparar
+              ? "border-[#EB6834] bg-[#FDF0EA] text-[#B4471C]"
+              : "border-[#CBD6E2] bg-white text-ink hover:border-brand"
+          }`}
+        >
+          {comparar ? "Ocultar comparação" : "Comparar com o real"}
+        </button>
       </div>
 
       <div className="mt-4 flex flex-wrap gap-7">
@@ -449,14 +468,18 @@ function CartaoGrafico({
         )}
       </div>
       <p className="mt-2 text-[12px] text-muted">
-        O modelo foi escolhido para este material entre 5 algoritmos, pelo menor erro ao prever até 3 meses à frente na
-        validação. A faixa mostra a margem de incerteza de ±20%.
+        {!comparar
+          ? "O modelo foi escolhido para este material entre 5 algoritmos, pelo menor erro ao prever até 3 meses à frente na validação. A faixa mostra a margem de incerteza de ±20%."
+          : semValidacao
+            ? "Este modelo foi treinado antes de a comparação existir. Treine de novo para ver o que o modelo previu nos meses passados."
+            : "Laranja: o que o modelo previu para cada mês usando só os meses anteriores. A média da distância até a linha azul é o erro médio (MAE)."}
       </p>
 
       {pronto ? (
         <GraficoMensal
           historico={mensal.historico.slice(-MESES_HISTORICO)}
           previsoes={mensal.previsoes.slice(0, HORIZONTE_MESES)}
+          validacao={comparar ? (mensal.validacao ?? []) : []}
           unidade={unidade}
         />
       ) : (
@@ -464,12 +487,14 @@ function CartaoGrafico({
           {carregando ? "Carregando gráfico…" : "Não foi possível carregar o gráfico deste material."}
         </div>
       )}
-      <Legenda faixa />
+      <Legenda faixa validacao={comparar && !semValidacao} />
     </div>
   );
 }
 
-function Legenda({ faixa }: { faixa: boolean }) {
+const COR_VALIDACAO = "#EB6834";
+
+function Legenda({ faixa, validacao = false }: { faixa: boolean; validacao?: boolean }) {
   return (
     <div className="mt-4 flex flex-wrap gap-5 text-xs text-muted">
       <span className="flex items-center gap-1.5">
@@ -484,6 +509,12 @@ function Legenda({ faixa }: { faixa: boolean }) {
         <span className="flex items-center gap-1.5">
           <span className="h-2.5 w-[18px] rounded-sm bg-[#4AA8E0]/20" />
           Faixa de incerteza
+        </span>
+      )}
+      {validacao && (
+        <span className="flex items-center gap-1.5">
+          <span className="h-0 w-[18px] border-t-[3px] border-dashed" style={{ borderColor: COR_VALIDACAO }} />
+          Previsto pelo modelo
         </span>
       )}
     </div>
@@ -503,19 +534,28 @@ function Estatistica({ rotulo, valor, dica }: { rotulo: string; valor: string; d
 function GraficoMensal({
   historico,
   previsoes,
+  validacao = [],
   unidade,
 }: {
   historico: PrevisaoMensalDetalhe["historico"];
   previsoes: PrevisaoMensalDetalhe["previsoes"];
+  validacao?: PontoValidacaoMensal[];
   unidade: string;
 }) {
   const [ativo, setAtivo] = useState<number | null>(null);
 
   const nHist = historico.length;
   const n = nHist + previsoes.length;
+  // Previsto na validação, pela posição do mês no histórico exibido. Meses fora
+  // da janela exibida ficam de fora; valor negativo é desenhado no zero.
+  const previstoPorMes = new Map(validacao.map((v) => [v.periodo, v.quantidade_prevista]));
+  const pontosValidacao = historico
+    .map((h, i) => ({ i, valor: previstoPorMes.get(h.periodo) }))
+    .filter((p): p is { i: number; valor: number } => p.valor != null);
   const valores = [
     ...historico.map((h) => h.quantidade),
     ...previsoes.map((p) => p.intervalo_superior ?? p.quantidade_prevista),
+    ...pontosValidacao.map((p) => p.valor),
   ];
   const maximo = Math.max(...valores, 1) * 1.1;
   const X = (i: number) => (n > 1 ? (i / (n - 1)) * 840 : 420);
@@ -544,16 +584,27 @@ function GraficoMensal({
       " Z"
       : "";
   const xBase = X(nHist - 1);
+  const caminhoValidacao = pontosValidacao
+    .map((p, k) => `${k ? "L" : "M"}${X(p.i).toFixed(1)} ${Y(Math.max(p.valor, 0)).toFixed(1)}`)
+    .join(" ");
 
   // Um ponto por mês, para a dica ao passar o mouse.
   const pontos = [
-    ...historico.map((h) => ({ periodo: h.periodo, valor: h.quantidade, previsto: false, inferior: null, superior: null })),
+    ...historico.map((h) => ({
+      periodo: h.periodo,
+      valor: h.quantidade,
+      previsto: false,
+      inferior: null,
+      superior: null,
+      validacao: previstoPorMes.get(h.periodo) ?? null,
+    })),
     ...previsoes.map((p) => ({
       periodo: p.periodo,
       valor: p.quantidade_prevista,
       previsto: true,
       inferior: p.intervalo_inferior,
       superior: p.intervalo_superior,
+      validacao: null,
     })),
   ];
   const largura = n > 1 ? 840 / (n - 1) : 840; // área de captura do mouse de cada mês
@@ -594,7 +645,29 @@ function GraficoMensal({
                 <line x1={xBase} y1="0" x2={xBase} y2="280" stroke="#9FB6CE" strokeWidth="1" strokeDasharray="3 3" vectorEffect="non-scaling-stroke" />
               </>
             )}
+            {pontosValidacao.length > 0 && (
+              <path
+                d={caminhoValidacao}
+                fill="none"
+                stroke={COR_VALIDACAO}
+                strokeWidth="2.5"
+                strokeDasharray="5 4"
+                strokeLinejoin="round"
+                vectorEffect="non-scaling-stroke"
+                data-testid="linha-validacao"
+              />
+            )}
           </svg>
+
+          {/* Losangos do previsto na validação: formato diferente do círculo do
+              realizado, para não depender só da cor. */}
+          {pontosValidacao.map((p) => (
+            <div
+              key={`validacao-${p.i}`}
+              className="pointer-events-none absolute h-[9px] w-[9px] -translate-x-1/2 -translate-y-1/2 rotate-45"
+              style={{ left: pct(X(p.i)), top: Y(Math.max(p.valor, 0)), background: COR_VALIDACAO }}
+            />
+          ))}
 
           {/* Um marcador por mês. Fica em HTML (e não no SVG) porque o SVG é
               esticado (preserveAspectRatio="none") e deformaria os círculos. */}
@@ -647,6 +720,20 @@ function GraficoMensal({
                 {ponto.previsto && ponto.inferior != null && ponto.superior != null && (
                   <div className="mt-0.5 text-[11px] text-[#D6E7F6]">
                     Faixa: {fmtNumero(ponto.inferior, 1)} a {fmtNumero(ponto.superior, 1)}
+                  </div>
+                )}
+                {ponto.validacao != null && (
+                  <div className="mt-1.5 border-t border-white/20 pt-1.5 text-[11px] text-[#D6E7F6]">
+                    <div>
+                      Previsto pelo modelo:{" "}
+                      <span className="font-bold text-white">
+                        {fmtNumero(ponto.validacao, 1)} {unidade}
+                      </span>
+                    </div>
+                    <div>
+                      Erro: {ponto.validacao - ponto.valor > 0 ? "+" : ""}
+                      {fmtNumero(ponto.validacao - ponto.valor, 1)} {unidade}
+                    </div>
                   </div>
                 )}
               </div>
