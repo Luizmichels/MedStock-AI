@@ -595,6 +595,14 @@ export interface PrevisaoMensalDetalhe {
   mape: number | null;
   historico: PontoHistoricoMensal[];
   previsoes: PrevisaoResponse[];
+  // O que o modelo previu para os meses passados na validação (walk-forward), para
+  // comparar com o realizado. Vazio em modelos treinados antes dessa informação.
+  validacao?: PontoValidacaoMensal[];
+}
+
+export interface PontoValidacaoMensal {
+  periodo: string; // 1º dia do mês, "AAAA-MM-DD"
+  quantidade_prevista: number;
 }
 
 export interface ResumoPrevisaoItem {

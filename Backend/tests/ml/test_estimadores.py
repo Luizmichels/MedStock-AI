@@ -34,6 +34,15 @@ def test_arvore_serie_curta_cai_para_media():
     assert previsao[0] == pytest.approx(6.0)
 
 
+@pytest.mark.parametrize("criar", [est.criar_random_forest, est.criar_gradient_boosting])
+def test_arvore_com_um_exemplo_cai_para_media(criar):
+    # 4 meses com 3 defasagens = 1 exemplo só (1ª dobra de um item com 13 meses).
+    # O LightGBM 4.7+ recusa treinar com 1 exemplo; o estimador prevê a média.
+    estimador = criar().fit([10, 20, 30, 40])
+    assert estimador.model is None
+    assert estimador.prever(2)[0] == pytest.approx(25.0)
+
+
 def _serie_24_meses() -> np.ndarray:
     return np.array([100 + 5 * i + (20 if (i % 12) in (10, 11) else 0) for i in range(24)], dtype=float)
 

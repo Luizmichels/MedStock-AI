@@ -10,6 +10,8 @@ from __future__ import annotations
 
 import numpy as np
 
+from app.core.config import settings
+
 ALGORITMOS = ("sma", "sarima", "holt_winters", "random_forest", "gradient_boosting")
 
 
@@ -124,8 +126,11 @@ class _EstimadorArvore(Estimador):
         valores = np.asarray(serie, dtype=float)
         self.historico = list(valores)
         X, y = self._montar_xy(valores, self.n_lags)
-        if len(X) == 0:
-            self.model = None  # série curta demais: cairá para a média em prever()
+        # Com menos de 2 exemplos não há o que aprender (e o LightGBM 4.7+ recusa
+        # treinar com 1): cai para a média em prever(). Acontece na 1ª dobra da
+        # validação de itens com 13 meses (treina com 4 meses = 1 exemplo).
+        if len(X) < 2:
+            self.model = None
             return self
         self.model = LGBMRegressor(boosting_type=self.boosting_type, **self.params)
         self.model.fit(X, y)
@@ -145,11 +150,12 @@ class _EstimadorArvore(Estimador):
         return np.array(previsoes)
 
 
+# n_jobs limita os núcleos do LightGBM (o padrão usa todos): ver ML_THREADS.
 _PARAMS_RF = dict(
     n_estimators=50, min_child_samples=1, bagging_fraction=0.8,
-    bagging_freq=1, verbose=-1,
+    bagging_freq=1, verbose=-1, n_jobs=settings.ML_THREADS,
 )
-_PARAMS_GBDT = dict(n_estimators=50, min_child_samples=1, verbose=-1)
+_PARAMS_GBDT = dict(n_estimators=50, min_child_samples=1, verbose=-1, n_jobs=settings.ML_THREADS)
 
 
 def criar_sma(janela: int = 3) -> _EstimadorSMA:

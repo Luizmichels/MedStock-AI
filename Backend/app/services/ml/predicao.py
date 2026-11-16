@@ -6,6 +6,7 @@ cada item elegível, de forma recursiva, com um intervalo simples de incerteza.
 
 from __future__ import annotations
 
+from datetime import date
 from typing import Callable
 
 from dateutil.relativedelta import relativedelta
@@ -87,6 +88,20 @@ def gerar_previsoes(
     return novas
 
 
+def _validacao_por_mes(validacao: dict | None) -> list[dict]:
+    """Expande o que o modelo previu na validação (1º mês + valores consecutivos,
+    gravado pelo treino) em um ponto por mês. Modelos treinados antes desta
+    informação existir não a têm: lista vazia."""
+    if not isinstance(validacao, dict) or not validacao.get("previstos"):
+        return []
+    inicio = date.fromisoformat(validacao["inicio"])
+    return [
+        {"periodo": inicio + relativedelta(months=passo), "quantidade_prevista": valor}
+        for passo, valor in enumerate(validacao["previstos"])
+        if valor is not None
+    ]
+
+
 def detalhe_mensal(db: Session, empresa_id: int, item_id: int) -> dict | None:
     """Histórico mensal do item (meses sem consumo = 0, até a referência comum),
     as previsões do modelo ativo e o algoritmo escolhido para ele, com as
@@ -115,6 +130,7 @@ def detalhe_mensal(db: Session, empresa_id: int, item_id: int) -> dict | None:
     previsoes: list[Previsao] = []
     algoritmo = None
     metricas: dict = {}
+    validacao: list[dict] = []
     if modelo is not None:
         previsoes = (
             db.query(Previsao)
@@ -130,6 +146,7 @@ def detalhe_mensal(db: Session, empresa_id: int, item_id: int) -> dict | None:
         if previsoes:
             algoritmo = algoritmo_do_item(modelo, item_id)
             metricas = (modelo.parametros or {}).get("itens", {}).get(str(item_id)) or {}
+            validacao = _validacao_por_mes(metricas.get("validacao"))
 
     return {
         "item_id": item_id,
@@ -139,6 +156,7 @@ def detalhe_mensal(db: Session, empresa_id: int, item_id: int) -> dict | None:
         "mape": metricas.get("mape"),
         "historico": historico,
         "previsoes": previsoes,
+        "validacao": validacao,
     }
 
 

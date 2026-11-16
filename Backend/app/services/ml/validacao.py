@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import math
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Callable
 
 import numpy as np
@@ -16,6 +16,9 @@ class ResultadoAvaliacao:
     mae: float
     rmse: float
     mape: float
+    # (posição do mês na série, valor previsto) de cada mês de teste, na ordem.
+    # É o que o modelo previu na validação, para comparar com o realizado.
+    previstos: list[tuple[int, float]] = field(default_factory=list)
 
 
 def walk_forward(
@@ -44,6 +47,7 @@ def walk_forward(
     inicio_teste = n - total_teste
     y_real: list[float] = []
     y_prev: list[float] = []
+    indices: list[int] = []
 
     for k in range(n_dobras):
         corte = inicio_teste + k * horizonte
@@ -56,9 +60,11 @@ def walk_forward(
         previsto = np.asarray(estimador.prever(teste.size), dtype=float)
         y_real.extend(teste.tolist())
         y_prev.extend(previsto.tolist())
+        indices.extend(range(corte, corte + teste.size))
 
     resultado = metrics.calcular_todas(y_real, y_prev)
     resultado["n_dobras"] = n_dobras
+    resultado["previstos"] = list(zip(indices, y_prev))
     return resultado
 
 
@@ -87,6 +93,7 @@ def comparar_algoritmos(
                 mae=metricas["mae"],
                 rmse=metricas["rmse"],
                 mape=metricas["mape"],
+                previstos=metricas["previstos"],
             )
         )
     return resultados
