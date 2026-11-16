@@ -179,12 +179,15 @@ jobs:
 
       # O lcov traz caminhos relativos ao Frontend/ ("SF:src/..."); o Sonar
       # analisa a partir da raiz do repositório e precisa de "SF:Frontend/src/...".
+      # Roda mesmo se a cobertura ficar abaixo do mínimo (o relatório existe e vai
+      # para o Sonar), mas não quando os testes nem chegaram a gerar o relatório:
+      # aí o erro que aparece é o do passo que falhou de verdade.
       - name: Ajustar caminhos da cobertura
-        if: always()
+        if: always() && hashFiles('Frontend/coverage/lcov.info') != ''
         run: sed -i 's|^SF:|SF:Frontend/|' coverage/lcov.info
 
       - uses: actions/upload-artifact@v7
-        if: always()
+        if: always() && hashFiles('Frontend/coverage/lcov.info') != ''
         with:
           name: cobertura-frontend
           path: Frontend/coverage/lcov.info
