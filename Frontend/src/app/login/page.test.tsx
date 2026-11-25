@@ -77,6 +77,17 @@ describe("Login", () => {
     expect(navegacao.replace).not.toHaveBeenCalled();
   });
 
+  it("hospital desativado mostra o motivo vindo da API e não navega", async () => {
+    const motivo = "O acesso deste hospital está desativado. Fale com o suporte do MedStock.";
+    mockFetch(resposta(403, { detail: motivo }));
+    abrirLogin();
+
+    await entrarCom("ana@hospital.org.br", "segredo123");
+
+    expect(await screen.findByText(motivo)).toBeInTheDocument();
+    expect(navegacao.replace).not.toHaveBeenCalled();
+  });
+
   it("falha de rede mostra a mensagem genérica", async () => {
     mockFetch(resposta(500, {}));
     abrirLogin();

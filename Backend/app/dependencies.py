@@ -6,6 +6,7 @@ from app.database import get_db
 from app.models.usuario import Usuario
 from app.core.config import settings
 from app.core.logs import atualizar_contexto
+from app.services import usuario_service
 
 bearer_scheme = HTTPBearer()
 
@@ -47,6 +48,10 @@ def get_current_user(
     ).first()
     if not usuario:
         raise HTTPException(status_code=401, detail="Usuário não encontrado ou inativo")
+    # Hospital desativado depois do login: a sessão aberta para de valer na hora,
+    # sem esperar o token expirar (o front trata o 401 saindo do sistema).
+    if usuario_service.empresa_desativada(usuario):
+        raise HTTPException(status_code=401, detail=usuario_service.MSG_EMPRESA_DESATIVADA)
     # Identifica a requisição nos logs só os IDs numéricos, nunca o e-mail
     atualizar_contexto(usuario_id=usuario.id, empresa_id=usuario.empresa_id)
     return usuario

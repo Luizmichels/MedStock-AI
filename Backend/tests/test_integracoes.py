@@ -120,3 +120,16 @@ def test_status_de_importacao_de_outro_hospital_da_404(
     envio = client.post("/integracoes/consumos", headers={"X-API-Key": chave}, json={"registros": [_registro()]})
     resposta = client.get(f"/integracoes/importacoes/{envio.json()['id']}", headers={"X-API-Key": chave_outro})
     assert resposta.status_code == 404
+
+
+def test_chave_de_hospital_desativado_e_recusada(client, db_session, empresa, token_admin):
+    chave = _gerar_chave(client, token_admin)
+    empresa.ativa = False
+    db_session.commit()
+
+    resposta = client.post(
+        "/integracoes/consumos", headers={"X-API-Key": chave}, json={"registros": [_registro()]}
+    )
+
+    assert resposta.status_code == 401
+    assert "desativado" in resposta.json()["detail"]

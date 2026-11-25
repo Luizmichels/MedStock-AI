@@ -34,6 +34,14 @@ const SLIDES = [
   },
 ];
 
+/** 401 = e-mail ou senha errados; 403 = senha certa, mas o hospital foi desativado
+ *  (a API explica no detail); o resto é falha de rede ou do servidor. */
+function mensagemLogin(e: unknown): string {
+  if (e instanceof ApiError && e.status === 401) return "Credenciais inválidas.";
+  if (e instanceof ApiError && e.status === 403 && typeof e.detail === "string") return e.detail;
+  return "Não foi possível entrar. Tente novamente.";
+}
+
 export default function LoginPage() {
   const router = useRouter();
   const { entrar, usuario, carregando } = useAuth();
@@ -85,7 +93,7 @@ export default function LoginPage() {
       const u = await entrar(email.trim(), senha);
       router.replace(papel(u.perfil) === "super" ? "/hospitais" : "/dashboard");
     } catch (e) {
-      setErro(e instanceof ApiError && e.status === 401 ? "Credenciais inválidas." : "Não foi possível entrar. Tente novamente.");
+      setErro(mensagemLogin(e));
     } finally {
       setEnviando(false);
     }

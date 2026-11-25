@@ -14,7 +14,7 @@ from app.schemas.auth_schemas import (
     RedefinirSenhaRequest,
     MensagemResponse,
 )
-from app.services import auth_service
+from app.services import auth_service, usuario_service
 
 router = APIRouter(prefix="/auth", tags=["Autenticação"])
 
@@ -30,6 +30,10 @@ def login(body: LoginRequest, db: Session = Depends(get_db)):
     )
     if not usuario or not verificar_senha(body.senha, usuario.senha_hash):
         raise HTTPException(status_code=401, detail="Credenciais inválidas")
+    # Só depois de a senha conferir: assim a mensagem não revela a quem não tem a
+    # senha que o e-mail existe nem que o hospital foi desativado.
+    if usuario_service.empresa_desativada(usuario):
+        raise HTTPException(status_code=403, detail=usuario_service.MSG_EMPRESA_DESATIVADA)
 
     token = criar_token(
         {
