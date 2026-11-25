@@ -146,3 +146,96 @@ def test_super_admin_nao_aparece_na_lista_de_usuarios(client, db_session, empres
     criar_usuario(db_session, empresa, perfil="super_admin")
     resposta = client.get("/usuarios/listar/usuarios", headers=_auth_de(usuario_admin))
     assert "super_admin" not in {u["perfil"] for u in resposta.json()}
+
+
+# --------------------------------------------------------------------------- #
+# Proteções: ninguém desativa a si mesmo e o hospital não fica sem admin
+# --------------------------------------------------------------------------- #
+def _outro_admin(db_session, admin, ativo=True):
+    """Segundo admin do mesmo hospital (o criar_usuario gera o e-mail pelo perfil)."""
+    from app.core.security import hash_senha
+    from app.models.usuario import Usuario
+
+    outro = Usuario(
+        empresa_id=admin.empresa_id, nome="Outro admin", email="outro.admin@hospitalteste.com",
+        senha_hash=hash_senha("Senha123!"), perfil="admin", ativo=ativo,
+    )
+    db_session.add(outro)
+    db_session.commit()
+    db_session.refresh(outro)
+    return outro
+
+
+def test_admin_nao_desativa_a_propria_conta(client, db_session, usuario_admin):
+    _outro_admin(db_session, usuario_admin)  # há outro admin
+    resposta = client.delete(
+        f"/usuarios/desativar/usuario/{usuario_admin.id}", headers=_auth_de(usuario_admin)
+    )
+    assert resposta.status_code == 400
+    assert "própria conta" in resposta.json()["detail"]
+    db_session.refresh(usuario_admin)
+    assert usuario_admin.ativo is True
+
+
+def test_admin_nao_se_desativa_pela_edicao(client, db_session, usuario_admin):
+    _outro_admin(db_session, usuario_admin)
+    resposta = client.patch(
+        f"/usuarios/atualizar/usuario/{usuario_admin.id}",
+        json={"ativo": False},
+        headers=_auth_de(usuario_admin),
+    )
+    assert resposta.status_code == 400
+
+
+def test_unico_admin_nao_pode_deixar_de_ser_admin(client, db_session, usuario_admin):
+    resposta = client.patch(
+        f"/usuarios/atualizar/usuario/{usuario_admin.id}",
+        json={"perfil": "usuario"},
+        headers=_auth_de(usuario_admin),
+    )
+    assert resposta.status_code == 400
+    assert "pelo menos um administrador" in resposta.json()["detail"]
+    db_session.refresh(usuario_admin)
+    assert usuario_admin.perfil == "admin"
+
+
+def test_admin_inativo_nao_conta_como_administrador(client, db_session, usuario_admin):
+    _outro_admin(db_session, usuario_admin, ativo=False)
+    resposta = client.patch(
+        f"/usuarios/atualizar/usuario/{usuario_admin.id}",
+        json={"perfil": "usuario"},
+        headers=_auth_de(usuario_admin),
+    )
+    assert resposta.status_code == 400
+
+
+def test_com_outro_admin_ativo_pode_deixar_de_ser_admin(client, db_session, usuario_admin):
+    _outro_admin(db_session, usuario_admin)
+    resposta = client.patch(
+        f"/usuarios/atualizar/usuario/{usuario_admin.id}",
+        json={"perfil": "usuario"},
+        headers=_auth_de(usuario_admin),
+    )
+    assert resposta.status_code == 200
+    assert resposta.json()["perfil"] == "usuario"
+
+
+def test_desativar_outro_admin_quando_ha_dois(client, db_session, usuario_admin):
+    outro_admin = _outro_admin(db_session, usuario_admin)
+    resposta = client.delete(
+        f"/usuarios/desativar/usuario/{outro_admin.id}", headers=_auth_de(usuario_admin)
+    )
+    assert resposta.status_code == 200
+    db_session.refresh(outro_admin)
+    assert outro_admin.ativo is False
+
+
+def test_reativar_usuario_nao_e_bloqueado(client, db_session, usuario_admin):
+    inativo = criar_usuario(db_session, usuario_admin.empresa, perfil="usuario", ativo=False)
+    resposta = client.patch(
+        f"/usuarios/atualizar/usuario/{inativo.id}",
+        json={"ativo": True},
+        headers=_auth_de(usuario_admin),
+    )
+    assert resposta.status_code == 200
+    assert resposta.json()["ativo"] is True
