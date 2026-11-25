@@ -92,7 +92,8 @@ app.include_router(previsoes_routers.router)
 app.include_router(dashboard_routers.router)
 app.include_router(exportacoes_routers.router)
 
-@app.get("/health", tags=["Sistema"])
+# Monitoramento externo checam com HEAD, e só GET
+@app.api_route("/health", methods=["GET", "HEAD"], tags=["Sistema"])
 def health(db: Session = Depends(get_db)):
     try:
         db.execute(text("SELECT 1"))
