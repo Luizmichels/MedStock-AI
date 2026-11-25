@@ -12,6 +12,7 @@ from fastapi import HTTPException
 from sqlalchemy.orm import Session
 
 from app.models.chave_integracao import ChaveIntegracao
+from app.models.empresa import Empresa
 
 PREFIXO_CHAVE = "msk_"
 TAMANHO_PREFIXO_EXIBIDO = 12
@@ -72,6 +73,11 @@ def autenticar(db: Session, chave: str | None) -> ChaveIntegracao:
     )
     if registro is None:
         raise HTTPException(status_code=401, detail="Chave de integração inválida ou revogada.")
+    # Hospital desativado: a chave dele também para de valer (senão o sistema do
+    # hospital continuaria enviando consumo para uma conta desativada).
+    empresa = db.get(Empresa, registro.empresa_id)
+    if empresa is None or not empresa.ativa:
+        raise HTTPException(status_code=401, detail="O acesso deste hospital está desativado.")
     registro.ultimo_uso_em = _agora()
     db.commit()
     return registro

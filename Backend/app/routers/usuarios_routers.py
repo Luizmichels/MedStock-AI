@@ -73,7 +73,9 @@ def atualizar(
     db: Session = Depends(get_db),
     current_user: Usuario = Depends(require_admin),
 ):
-    return usuario_service.atualizar_usuario(db, usuario_id, current_user.empresa_id, dados)
+    return usuario_service.atualizar_usuario(
+        db, usuario_id, current_user.empresa_id, dados, solicitante_id=current_user.id
+    )
 
 
 @router.delete("/desativar/usuario/{usuario_id}", response_model=UsuarioResponse)
@@ -82,4 +84,6 @@ def desativar(
     db: Session = Depends(get_db),
     current_user: Usuario = Depends(require_admin),
 ):
-    return usuario_service.desativar_usuario(db, usuario_id, current_user.empresa_id)
+    return usuario_service.desativar_usuario(
+        db, usuario_id, current_user.empresa_id, solicitante_id=current_user.id
+    )

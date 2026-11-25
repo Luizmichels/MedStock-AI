@@ -3,6 +3,7 @@ from datetime import date, datetime, timezone
 from io import BytesIO
 from typing import BinaryIO, Iterable, Tuple
 
+import re
 import pandas as pd
 from sqlalchemy.orm import Session
 
@@ -165,12 +166,28 @@ def _parsear_data(valor: str | date) -> date | None:
     return None
 
 
+def _normalizar_numero(valor: str) -> str:
+    valor = valor.strip()
+
+    if "," in valor and "." in valor:
+        # Formato brasileiro: 1.234,56
+        if re.fullmatch(r"[+-]?\d{1,3}(?:\.\d{3})+,\d+", valor):
+            return valor.replace(".", "").replace(",", ".")
+
+        # Formato internacional: 1,234.56
+        if re.fullmatch(r"[+-]?\d{1,3}(?:,\d{3})+\.\d+", valor):
+            return valor.replace(",", "")
+
+        return valor
+
+    return valor.replace(",", ".")
+
+
 def _numerico(coluna: pd.Series) -> pd.Series:
-    """Converte para float aceitando vírgula decimal; inválidos viram NaN."""
-    return pd.to_numeric(
-        coluna.astype(str).str.strip().str.replace(",", ".", regex=False),
-        errors="coerce",
-    )
+    """Converte números brasileiros e internacionais para valores numéricos."""
+    valores = coluna.astype(str).map(_normalizar_numero)
+
+    return pd.to_numeric(valores, errors="coerce")
 
 
 def _limpar_dados(df: pd.DataFrame) -> Tuple[pd.DataFrame, list]:
