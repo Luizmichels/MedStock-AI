@@ -115,6 +115,14 @@ services:
       - ./deploy/Caddyfile:/etc/caddy/Caddyfile:ro
       - caddy_data:/data
       - caddy_config:/config
+    # A API de administração do Caddy (só dentro do container, porta 2019)
+    # responde quando o processo está no ar e com a configuração carregada.
+    healthcheck:
+      test: [ "CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:2019/config/" ]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
     depends_on:
       - api
       - frontend
